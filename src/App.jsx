@@ -14,20 +14,48 @@ const SCENARIOS = [
   { id: 'doctor',     emoji: '🏥', label: 'En la clínica',         opening: '¡Buenos días! Soy Sofía, la enfermera. ¿Cómo se llama usted? ¿Y cuál es el motivo de su visita hoy?' },
 ];
 
+const STORAGE_KEY = 'sofia-conversation';
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function saveState(scenarioId, messages) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ scenarioId, messages }));
+  } catch { /* storage full or unavailable — fail silently */ }
+}
+
 export default function App() {
-  const [scenario, setScenario] = useState(SCENARIOS[0]);
+  const saved = loadSaved();
+  const savedScenario = SCENARIOS.find((s) => s.id === saved?.scenarioId) ?? SCENARIOS[0];
+  const savedMessages = saved?.messages?.length ? saved.messages : [{ role: 'assistant', content: savedScenario.opening }];
+
+  const [scenario, setScenario] = useState(savedScenario);
   const [showScenarios, setShowScenarios] = useState(false);
-  const [messages, setMessages] = useState([{ role: 'assistant', content: SCENARIOS[0].opening }]);
+  const [messages, setMessages] = useState(savedMessages);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [inputText, setInputText] = useState('');
   const [transcript, setTranscript] = useState('');
   const [hasSpeechSupport, setHasSpeechSupport] = useState(true);
+  const [showNewConfirm, setShowNewConfirm] = useState(false);
 
   const recognitionRef = useRef(null);
   const voiceRef = useRef(null);
   const pendingTranscriptRef = useRef('');
+
+  // Persist conversation whenever messages or scenario change
+  useEffect(() => {
+    saveState(scenario.id, messages);
+  }, [scenario.id, messages]);
 
   useEffect(() => {
     const loadVoice = () => {
@@ -44,7 +72,9 @@ export default function App() {
     return () => window.speechSynthesis?.removeEventListener('voiceschanged', loadVoice);
   }, []);
 
-  const speakText = useCallback((text) => {
+  const audioRef = useRef(null);
+
+  const speakWebSpeech = useCallback((text) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -58,11 +88,35 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // Speak opening when scenario changes
-  useEffect(() => {
-    const timer = setTimeout(() => speakText(scenario.opening), 500);
-    return () => clearTimeout(timer);
-  }, [scenario, speakText]);
+  const speakText = useCallback(async (text) => {
+    // Stop anything currently playing
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    window.speechSynthesis?.cancel();
+
+    try {
+      const res = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error('ElevenLabs unavailable');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onplay = () => setIsSpeaking(true);
+      audio.onended = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
+      audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
+      await audio.play();
+    } catch {
+      // ElevenLabs not configured or failed — fall back to Web Speech API
+      speakWebSpeech(text);
+    }
+  }, [speakWebSpeech]);
 
   const sendMessage = useCallback(
     async (content) => {
@@ -109,11 +163,10 @@ export default function App() {
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'es-MX';
-    recognition.continuous = true;   // stay open across pauses
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    // Accumulate all final segments — pauses won't cut the sentence short
     let accumulatedFinal = '';
     pendingTranscriptRef.current = '';
 
@@ -121,7 +174,6 @@ export default function App() {
 
     recognition.onresult = (event) => {
       let interim = '';
-      // Walk only the new results since last event
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const r = event.results[i];
         if (r.isFinal) {
@@ -136,7 +188,6 @@ export default function App() {
     };
 
     recognition.onerror = (e) => {
-      // 'no-speech' is harmless in continuous mode — just keep going
       if (e.error === 'no-speech') return;
       console.error('Speech recognition error:', e.error);
       setIsListening(false);
@@ -145,8 +196,6 @@ export default function App() {
     };
 
     recognition.onend = () => {
-      // onend fires if the browser cuts us off (e.g. iOS timeout)
-      // — send whatever we have rather than losing it
       setIsListening(false);
       const pending = pendingTranscriptRef.current.trim();
       if (pending) {
@@ -159,7 +208,6 @@ export default function App() {
     recognition.start();
   }, [sendMessage]);
 
-  // User taps mic while listening → send what they've said so far
   const stopListening = useCallback(() => {
     const pending = pendingTranscriptRef.current.trim();
     recognitionRef.current?.stop();
@@ -179,6 +227,15 @@ export default function App() {
     setInputText('');
   };
 
+  const startNewConversation = () => {
+    window.speechSynthesis?.cancel();
+    setShowNewConfirm(false);
+    setMessages([{ role: 'assistant', content: scenario.opening }]);
+    setTranscript('');
+    setInputText('');
+    speakText(scenario.opening);
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -195,11 +252,22 @@ export default function App() {
               </div>
             </div>
           )}
-          <button className="scenario-btn" onClick={() => setShowScenarios((v) => !v)} aria-label="Change scenario">
+          <button className="scenario-btn" onClick={() => setShowNewConfirm((v) => !v)} aria-label="New conversation" title="New conversation">
+            🔄
+          </button>
+          <button className="scenario-btn" onClick={() => setShowScenarios((v) => !v)} aria-label="Change scenario" title="Change scenario">
             🎭
           </button>
         </div>
       </header>
+
+      {showNewConfirm && (
+        <div className="confirm-bar">
+          <span>¿Empezar una conversación nueva?</span>
+          <button className="confirm-yes" onClick={startNewConversation}>Sí, empezar</button>
+          <button className="confirm-no" onClick={() => setShowNewConfirm(false)}>Cancelar</button>
+        </div>
+      )}
 
       {showScenarios && (
         <div className="scenario-panel">
