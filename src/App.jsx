@@ -60,23 +60,23 @@ export default function App() {
   const [speedIdx, setSpeedIdx] = useState(0);
   const currentSpeed = SPEEDS[speedIdx];
 
-  const cycleSpeed = () => {
-    const nextIdx = (speedIdx + 1) % SPEEDS.length;
-    const nextRate = SPEEDS[nextIdx].rate;
-    setSpeedIdx(nextIdx);
-    // Apply instantly to any audio already playing
-    if (audioRef.current && !audioRef.current.paused) {
-      audioRef.current.playbackRate = nextRate;
-    } else if (window.speechSynthesis?.speaking) {
-      // Web Speech API doesn't support live rate change — cancel and note new rate
-      // will apply on next utterance (no clean live solution for Web Speech)
-    }
-  };
-
   const recognitionRef = useRef(null);
   const voiceRef = useRef(null);
   const pendingTranscriptRef = useRef('');
   const audioRef = useRef(null);
+  // speedRef stays current even inside stale callbacks
+  const speedRef = useRef(SPEEDS[0].rate);
+
+  const cycleSpeed = () => {
+    const nextIdx = (speedIdx + 1) % SPEEDS.length;
+    const nextRate = SPEEDS[nextIdx].rate;
+    speedRef.current = nextRate;
+    setSpeedIdx(nextIdx);
+    // Apply instantly to already-playing ElevenLabs audio
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate;
+    }
+  };
 
   // Persist conversation whenever messages or scenario change
   useEffect(() => {
@@ -98,12 +98,12 @@ export default function App() {
     return () => window.speechSynthesis?.removeEventListener('voiceschanged', loadVoice);
   }, []);
 
-  const speakWebSpeech = useCallback((text, rate = 1.0) => {
+  const speakWebSpeech = useCallback((text) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'es-MX';
-    utterance.rate = 0.88 * rate;   // 0.88 is our natural baseline
+    utterance.rate = 0.88 * speedRef.current;  // always reads live ref
     utterance.pitch = 1.05;
     if (voiceRef.current) utterance.voice = voiceRef.current;
     utterance.onstart = () => setIsSpeaking(true);
@@ -112,7 +112,7 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  const speakText = useCallback(async (text, rate = 1.0) => {
+  const speakText = useCallback(async (text) => {
     // Stop anything currently playing
     if (audioRef.current) {
       audioRef.current.pause();
@@ -125,14 +125,14 @@ export default function App() {
       const res = await fetch('/api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, speed: rate }),
+        body: JSON.stringify({ text }),
       });
       if (!res.ok) throw new Error('ElevenLabs unavailable');
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      audio.playbackRate = rate;   // set speed instantly on the audio element
+      audio.playbackRate = speedRef.current;  // always reads live ref
       audioRef.current = audio;
       audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
       audio.onpause  = () => { setIsPaused(true); };
@@ -191,7 +191,7 @@ export default function App() {
         const data = await res.json();
         const assistantMsg = { role: 'assistant', content: data.message };
         setMessages((prev) => [...prev, assistantMsg]);
-        speakText(data.message, currentSpeed.rate);
+        speakText(data.message);
       } catch (err) {
         console.error('Chat error:', err);
         setMessages((prev) => [
@@ -325,7 +325,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: scenario.opening }]);
     setTranscript('');
     setInputText('');
-    speakText(scenario.opening, currentSpeed.rate);
+    speakText(scenario.opening);
   };
 
   return (
