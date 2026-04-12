@@ -48,7 +48,7 @@ export default function App() {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'es-ES';
+    utterance.lang = 'es-MX';
     utterance.rate = 0.88;
     utterance.pitch = 1.05;
     if (voiceRef.current) utterance.voice = voiceRef.current;
@@ -108,7 +108,7 @@ export default function App() {
     setIsSpeaking(false);
 
     const recognition = new SpeechRecognition();
-    recognition.lang = 'es-ES';
+    recognition.lang = 'es-MX';
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
