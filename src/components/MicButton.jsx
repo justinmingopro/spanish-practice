@@ -28,7 +28,7 @@ export default function MicButton({ isListening, isLoading, onStart, onStop }) {
         )}
       </button>
       <span className="mic-label">
-        {isListening ? 'Toca para parar' : 'Toca para hablar'}
+        {isListening ? 'Toca para enviar ✓' : 'Toca para hablar'}
       </span>
     </>
   );

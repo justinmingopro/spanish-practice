@@ -109,28 +109,35 @@ export default function App() {
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'es-MX';
-    recognition.continuous = false;
+    recognition.continuous = true;   // stay open across pauses
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    let finalSent = false;
+    // Accumulate all final segments — pauses won't cut the sentence short
+    let accumulatedFinal = '';
     pendingTranscriptRef.current = '';
 
     recognition.onstart = () => setIsListening(true);
 
     recognition.onresult = (event) => {
-      const result = event.results[event.results.length - 1];
-      const text = result[0].transcript;
-      pendingTranscriptRef.current = text;
-      setTranscript(text);
-      if (result.isFinal) {
-        finalSent = true;
-        setIsListening(false);
-        sendMessage(text);
+      let interim = '';
+      // Walk only the new results since last event
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const r = event.results[i];
+        if (r.isFinal) {
+          accumulatedFinal += r[0].transcript + ' ';
+        } else {
+          interim += r[0].transcript;
+        }
       }
+      const display = (accumulatedFinal + interim).trim();
+      pendingTranscriptRef.current = display;
+      setTranscript(display);
     };
 
     recognition.onerror = (e) => {
+      // 'no-speech' is harmless in continuous mode — just keep going
+      if (e.error === 'no-speech') return;
       console.error('Speech recognition error:', e.error);
       setIsListening(false);
       setTranscript('');
@@ -138,9 +145,12 @@ export default function App() {
     };
 
     recognition.onend = () => {
+      // onend fires if the browser cuts us off (e.g. iOS timeout)
+      // — send whatever we have rather than losing it
       setIsListening(false);
-      if (!finalSent && pendingTranscriptRef.current.trim()) {
-        sendMessage(pendingTranscriptRef.current);
+      const pending = pendingTranscriptRef.current.trim();
+      if (pending) {
+        sendMessage(pending);
         pendingTranscriptRef.current = '';
       }
     };
@@ -149,10 +159,16 @@ export default function App() {
     recognition.start();
   }, [sendMessage]);
 
+  // User taps mic while listening → send what they've said so far
   const stopListening = useCallback(() => {
+    const pending = pendingTranscriptRef.current.trim();
     recognitionRef.current?.stop();
     setIsListening(false);
-  }, []);
+    if (pending) {
+      sendMessage(pending);
+      pendingTranscriptRef.current = '';
+    }
+  }, [sendMessage]);
 
   const switchScenario = (s) => {
     window.speechSynthesis?.cancel();
