@@ -149,13 +149,13 @@
   background: none;
   border: 1.5px solid var(--border);
   color: var(--text-muted);
-  padding: 7px 14px;
-  font-size: 0.875rem;
+  padding: 10px 20px;
+  font-size: 1rem;
   cursor: pointer;
   border-radius: 999px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 
