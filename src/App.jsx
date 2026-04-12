@@ -48,6 +48,9 @@ export default function App() {
   const [transcript, setTranscript] = useState('');
   const [hasSpeechSupport, setHasSpeechSupport] = useState(true);
   const [showNewConfirm, setShowNewConfirm] = useState(false);
+  const [showDrillPanel, setShowDrillPanel] = useState(false);
+  const [drillType, setDrillType] = useState(null);   // 'shadowing' | 'vocabulary' | 'dialogue'
+  const [drillTopic, setDrillTopic] = useState(null); // free-text topic label
 
   const SPEEDS = [
     { label: '1×',  rate: 1.0 },
@@ -178,7 +181,11 @@ export default function App() {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: updatedMessages, scenario: scenario.id }),
+          body: JSON.stringify({
+            messages: updatedMessages,
+            scenario: scenario.id,
+            ...(drillType && drillTopic ? { drillType, drillTopic } : {}),
+          }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -195,7 +202,7 @@ export default function App() {
         setIsLoading(false);
       }
     },
-    [messages, isLoading, scenario, speakText]
+    [messages, isLoading, scenario, drillType, drillTopic, speakText]
   );
 
   const startListening = useCallback(() => {
@@ -270,6 +277,48 @@ export default function App() {
     setInputText('');
   };
 
+  const DRILL_TOPICS = [
+    '👋 Saludos',
+    '👨‍👩‍👧 La familia',
+    '🍽️ La comida',
+    '🙏 La fe y la oración',
+    '💼 El trabajo',
+    '🗺️ Viajes y direcciones',
+    '🏥 La salud',
+    '🛒 Las compras',
+    '🕐 El tiempo y los números',
+    '🌦️ El clima',
+    '😊 Emociones y sentimientos',
+    '🏠 El hogar',
+  ];
+
+  const DRILL_TYPES = [
+    { id: 'shadowing',  emoji: '🔁', label: 'Shadowing',            desc: 'Sofía says a phrase — you repeat it. Builds pronunciation.' },
+    { id: 'vocabulary', emoji: '📚', label: 'Vocabulary in context', desc: 'Learn words through real sentences, then use them yourself.' },
+    { id: 'dialogue',   emoji: '🎭', label: 'Scripted dialogue',     desc: 'Play a role in a mini-conversation. Sofía guides you through.' },
+  ];
+
+  const startDrill = (type, topic) => {
+    window.speechSynthesis?.cancel();
+    setDrillType(type);
+    setDrillTopic(topic);
+    setShowDrillPanel(false);
+    const opening = { role: 'assistant', content: `¡Vamos a practicar! 🎯 Iniciando un drill de **${type}** sobre el tema: **${topic}**. ¡Prepárate!` };
+    setMessages([opening]);
+    setTranscript('');
+    setInputText('');
+    // Kick off the drill — send an empty first user turn so Sofía starts
+    setTimeout(() => sendMessage('¡Listo! Empecemos.'), 300);
+  };
+
+  const exitDrill = () => {
+    setDrillType(null);
+    setDrillTopic(null);
+    setMessages([{ role: 'assistant', content: scenario.opening }]);
+    setTranscript('');
+    setInputText('');
+  };
+
   const startNewConversation = () => {
     window.speechSynthesis?.cancel();
     setShowNewConfirm(false);
@@ -307,6 +356,9 @@ export default function App() {
           <button className="scenario-btn" onClick={() => setShowNewConfirm((v) => !v)} aria-label="New conversation" title="New conversation">
             🔄
           </button>
+          <button className={`scenario-btn ${showDrillPanel ? 'active' : ''} ${drillType ? 'drill-active' : ''}`} onClick={() => setShowDrillPanel((v) => !v)} aria-label="Drill mode" title="Drill mode">
+            🎯
+          </button>
           <button className="scenario-btn" onClick={() => setShowScenarios((v) => !v)} aria-label="Change scenario" title="Change scenario">
             🎭
           </button>
@@ -318,6 +370,56 @@ export default function App() {
           <span>¿Empezar una conversación nueva?</span>
           <button className="confirm-yes" onClick={startNewConversation}>Sí, empezar</button>
           <button className="confirm-no" onClick={() => setShowNewConfirm(false)}>Cancelar</button>
+        </div>
+      )}
+
+      {/* Active drill banner */}
+      {drillType && (
+        <div className="drill-banner">
+          <span>{DRILL_TYPES.find(d => d.id === drillType)?.emoji} <strong>{DRILL_TYPES.find(d => d.id === drillType)?.label}</strong> — {drillTopic}</span>
+          <button className="drill-exit-btn" onClick={exitDrill}>✕ Salir del drill</button>
+        </div>
+      )}
+
+      {/* Drill panel */}
+      {showDrillPanel && (
+        <div className="drill-panel">
+          <p className="drill-panel-title">🎯 Modo Drill — Elige un tipo y un tema</p>
+
+          <div className="drill-type-row">
+            {DRILL_TYPES.map((dt) => (
+              <button
+                key={dt.id}
+                className={`drill-type-card ${drillType === dt.id ? 'active' : ''}`}
+                onClick={() => setDrillType(dt.id)}
+              >
+                <span className="drill-type-emoji">{dt.emoji}</span>
+                <span className="drill-type-label">{dt.label}</span>
+                <span className="drill-type-desc">{dt.desc}</span>
+              </button>
+            ))}
+          </div>
+
+          <p className="drill-section-label">Elige un tema:</p>
+          <div className="drill-topic-grid">
+            {DRILL_TOPICS.map((t) => (
+              <button
+                key={t}
+                className={`drill-topic-chip ${drillTopic === t ? 'active' : ''}`}
+                onClick={() => setDrillTopic(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          <button
+            className="drill-start-btn"
+            disabled={!drillType || !drillTopic}
+            onClick={() => startDrill(drillType, drillTopic)}
+          >
+            ¡Empezar el drill! →
+          </button>
         </div>
       )}
 
