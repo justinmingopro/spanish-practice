@@ -3,22 +3,21 @@ import ConversationHistory from './components/ConversationHistory';
 import MicButton from './components/MicButton';
 import './App.css';
 
-const INITIAL_MESSAGE = {
-  role: 'assistant',
-  content: '¡Hola! Soy Sofía, tu compañera de conversación en español. 😊 ¿Cómo estás hoy? ¿De qué te gustaría hablar?',
-};
-
-const TOPIC_CHIPS = [
-  '¿Cómo fue tu día?',
-  'La familia',
-  'La fe',
-  'El trabajo',
-  'La comida',
-  'Los planes',
+const SCENARIOS = [
+  { id: 'free',       emoji: '💬', label: 'Conversación libre',   opening: '¡Hola! Soy Sofía, tu compañera de conversación. 😊 ¿Cómo estás hoy? ¿De qué te gustaría hablar?' },
+  { id: 'restaurant', emoji: '🍽️', label: 'En el restaurante',    opening: '¡Buenas tardes! Bienvenido a La Mesa Bonita. ¿Tiene reservación, o prefiere sentarse en la terraza? Aquí tiene el menú. 😊' },
+  { id: 'market',     emoji: '🛒', label: 'En el mercado',         opening: '¡Buenos días! Pase, pase. Tenemos frutas frescas, especias, y artesanías. ¿Qué le puedo ofrecer hoy?' },
+  { id: 'family',     emoji: '👨‍👩‍👧', label: 'La familia',           opening: '¡Hola, vecino! Estaba pensando en hacer tamales este domingo con mi familia. ¿Cómo está su familia? ¿Tienen tradiciones especiales?' },
+  { id: 'faith',      emoji: '🙏', label: 'La fe',                 opening: '¡Hola! Estaba leyendo un pasaje de los Salmos esta mañana — tan hermoso. ¿Cómo va tu vida espiritual últimamente? ¿Estás en una iglesia?' },
+  { id: 'work',       emoji: '💼', label: 'El trabajo',            opening: '¡Uf, qué semana tan larga! Oye, ¿ya terminaste el informe para el jefe? Yo todavía tengo mucho que hacer antes del viernes.' },
+  { id: 'travel',     emoji: '🗺️', label: 'De viaje',              opening: '¡Hola! ¿Necesita ayuda? Soy de aquí — conozco bien la ciudad. ¿Busca algo en particular? ¿Un restaurante, un museo, quizás el mercado central?' },
+  { id: 'doctor',     emoji: '🏥', label: 'En la clínica',         opening: '¡Buenos días! Soy Sofía, la enfermera. ¿Cómo se llama usted? ¿Y cuál es el motivo de su visita hoy?' },
 ];
 
 export default function App() {
-  const [messages, setMessages] = useState([INITIAL_MESSAGE]);
+  const [scenario, setScenario] = useState(SCENARIOS[0]);
+  const [showScenarios, setShowScenarios] = useState(false);
+  const [messages, setMessages] = useState([{ role: 'assistant', content: SCENARIOS[0].opening }]);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -30,52 +29,40 @@ export default function App() {
   const voiceRef = useRef(null);
   const pendingTranscriptRef = useRef('');
 
-  // Load Spanish voice, retry until voices are available
   useEffect(() => {
     const loadVoice = () => {
       const voices = window.speechSynthesis?.getVoices() ?? [];
-      const spanish =
+      voiceRef.current =
         voices.find((v) => v.lang === 'es-MX') ||
         voices.find((v) => v.lang === 'es-US') ||
         voices.find((v) => v.lang.startsWith('es')) ||
         null;
-      voiceRef.current = spanish;
     };
-
     loadVoice();
     window.speechSynthesis?.addEventListener('voiceschanged', loadVoice);
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) setHasSpeechSupport(false);
-
-    return () => {
-      window.speechSynthesis?.removeEventListener('voiceschanged', loadVoice);
-    };
-  }, []);
-
-  // Speak the greeting after a short delay
-  useEffect(() => {
-    const timer = setTimeout(() => speakText(INITIAL_MESSAGE.content), 600);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) setHasSpeechSupport(false);
+    return () => window.speechSynthesis?.removeEventListener('voiceschanged', loadVoice);
   }, []);
 
   const speakText = useCallback((text) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'es-ES';
     utterance.rate = 0.88;
     utterance.pitch = 1.05;
     if (voiceRef.current) utterance.voice = voiceRef.current;
-
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
-
     window.speechSynthesis.speak(utterance);
   }, []);
+
+  // Speak opening when scenario changes
+  useEffect(() => {
+    const timer = setTimeout(() => speakText(scenario.opening), 500);
+    return () => clearTimeout(timer);
+  }, [scenario, speakText]);
 
   const sendMessage = useCallback(
     async (content) => {
@@ -94,34 +81,29 @@ export default function App() {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: updatedMessages }),
+          body: JSON.stringify({ messages: updatedMessages, scenario: scenario.id }),
         });
-
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const assistantMsg = { role: 'assistant', content: data.message };
-
         setMessages((prev) => [...prev, assistantMsg]);
         speakText(data.message);
       } catch (err) {
         console.error('Chat error:', err);
-        const errMsg = {
-          role: 'assistant',
-          content: 'Lo siento, hubo un problema de conexión. Por favor, intenta de nuevo. 🙏',
-        };
-        setMessages((prev) => [...prev, errMsg]);
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: 'Lo siento, hubo un problema de conexión. Por favor, intenta de nuevo. 🙏' },
+        ]);
       } finally {
         setIsLoading(false);
       }
     },
-    [messages, isLoading, speakText]
+    [messages, isLoading, scenario, speakText]
   );
 
   const startListening = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
-
-    // Stop any ongoing speech
     window.speechSynthesis?.cancel();
     setIsSpeaking(false);
 
@@ -131,10 +113,10 @@ export default function App() {
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    recognition.onstart = () => setIsListening(true);
-
     let finalSent = false;
     pendingTranscriptRef.current = '';
+
+    recognition.onstart = () => setIsListening(true);
 
     recognition.onresult = (event) => {
       const result = event.results[event.results.length - 1];
@@ -157,7 +139,6 @@ export default function App() {
 
     recognition.onend = () => {
       setIsListening(false);
-      // Fallback: some browsers end without firing isFinal — send whatever we captured
       if (!finalSent && pendingTranscriptRef.current.trim()) {
         sendMessage(pendingTranscriptRef.current);
         pendingTranscriptRef.current = '';
@@ -173,44 +154,58 @@ export default function App() {
     setIsListening(false);
   }, []);
 
+  const switchScenario = (s) => {
+    window.speechSynthesis?.cancel();
+    setShowScenarios(false);
+    setScenario(s);
+    setMessages([{ role: 'assistant', content: s.opening }]);
+    setTranscript('');
+    setInputText('');
+  };
+
   return (
     <div className="app">
       <header className="app-header">
         <div className="header-title">
           <h1>🇪🇸 Sofía</h1>
-          <p>Tu compañera de español</p>
+          <p className="scenario-label">{scenario.emoji} {scenario.label}</p>
         </div>
-        {isSpeaking && (
-          <div className="speaking-indicator">
-            <span>Sofía habla</span>
-            <div className="wave-bars">
-              <div className="bar" />
-              <div className="bar" />
-              <div className="bar" />
+        <div className="header-right">
+          {isSpeaking && (
+            <div className="speaking-indicator">
+              <span>Sofía habla</span>
+              <div className="wave-bars">
+                <div className="bar" /><div className="bar" /><div className="bar" />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          <button className="scenario-btn" onClick={() => setShowScenarios((v) => !v)} aria-label="Change scenario">
+            🎭
+          </button>
+        </div>
       </header>
 
-      <ConversationHistory
-        messages={messages}
-        isLoading={isLoading}
-        onReplay={speakText}
-      />
-
-      {messages.length <= 2 && !isLoading && (
-        <div className="topic-chips">
-          {TOPIC_CHIPS.map((chip) => (
-            <button key={chip} className="chip" onClick={() => sendMessage(chip)}>
-              {chip}
-            </button>
-          ))}
+      {showScenarios && (
+        <div className="scenario-panel">
+          <p className="scenario-panel-title">Elige una situación</p>
+          <div className="scenario-grid">
+            {SCENARIOS.map((s) => (
+              <button
+                key={s.id}
+                className={`scenario-card ${scenario.id === s.id ? 'active' : ''}`}
+                onClick={() => switchScenario(s)}
+              >
+                <span className="scenario-card-emoji">{s.emoji}</span>
+                <span className="scenario-card-label">{s.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
-      {transcript && (
-        <div className="transcript-preview">{transcript}</div>
-      )}
+      <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} />
+
+      {transcript && <div className="transcript-preview">{transcript}</div>}
 
       <div className="input-area">
         <div className="text-input-row">
@@ -234,16 +229,9 @@ export default function App() {
         </div>
 
         {hasSpeechSupport ? (
-          <MicButton
-            isListening={isListening}
-            isLoading={isLoading}
-            onStart={startListening}
-            onStop={stopListening}
-          />
+          <MicButton isListening={isListening} isLoading={isLoading} onStart={startListening} onStop={stopListening} />
         ) : (
-          <p className="no-speech-notice">
-            Speech not supported in this browser. Use Chrome for mic input.
-          </p>
+          <p className="no-speech-notice">Speech not supported. Use Chrome for mic input.</p>
         )}
       </div>
     </div>

@@ -345,6 +345,102 @@
   background: var(--primary-light);
 }
 
+/* ── Scenario button & panel ── */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scenario-btn {
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.scenario-btn:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.scenario-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.scenario-panel {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 16px;
+  flex-shrink: 0;
+}
+
+.scenario-panel-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 400px) {
+  .scenario-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.scenario-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.scenario-card:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.scenario-card.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.scenario-card-emoji {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.scenario-card-label {
+  font-size: 0.65rem;
+  color: var(--text);
+  text-align: center;
+  line-height: 1.2;
+}
+
 /* ── No-speech notice ── */
 .no-speech-notice {
   font-size: 0.75rem;
