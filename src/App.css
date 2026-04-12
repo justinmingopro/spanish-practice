@@ -46,6 +46,17 @@
   font-weight: 500;
 }
 
+.pause-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 .wave-bars {
   display: flex;
   align-items: center;

@@ -42,6 +42,7 @@ export default function App() {
   const [messages, setMessages] = useState(savedMessages);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [inputText, setInputText] = useState('');
   const [transcript, setTranscript] = useState('');
@@ -54,12 +55,25 @@ export default function App() {
     { label: '½×',  rate: 0.5 },
   ];
   const [speedIdx, setSpeedIdx] = useState(0);
-  const cycleSpeed = () => setSpeedIdx((i) => (i + 1) % SPEEDS.length);
   const currentSpeed = SPEEDS[speedIdx];
+
+  const cycleSpeed = () => {
+    const nextIdx = (speedIdx + 1) % SPEEDS.length;
+    const nextRate = SPEEDS[nextIdx].rate;
+    setSpeedIdx(nextIdx);
+    // Apply instantly to any audio already playing
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.playbackRate = nextRate;
+    } else if (window.speechSynthesis?.speaking) {
+      // Web Speech API doesn't support live rate change — cancel and note new rate
+      // will apply on next utterance (no clean live solution for Web Speech)
+    }
+  };
 
   const recognitionRef = useRef(null);
   const voiceRef = useRef(null);
   const pendingTranscriptRef = useRef('');
+  const audioRef = useRef(null);
 
   // Persist conversation whenever messages or scenario change
   useEffect(() => {
@@ -80,8 +94,6 @@ export default function App() {
     if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) setHasSpeechSupport(false);
     return () => window.speechSynthesis?.removeEventListener('voiceschanged', loadVoice);
   }, []);
-
-  const audioRef = useRef(null);
 
   const speakWebSpeech = useCallback((text, rate = 1.0) => {
     if (!window.speechSynthesis) return;
@@ -104,6 +116,7 @@ export default function App() {
       audioRef.current = null;
     }
     window.speechSynthesis?.cancel();
+    setIsPaused(false);
 
     try {
       const res = await fetch('/api/speak', {
@@ -116,15 +129,37 @@ export default function App() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      audio.playbackRate = rate;   // set speed instantly on the audio element
       audioRef.current = audio;
-      audio.onplay = () => setIsSpeaking(true);
-      audio.onended = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
-      audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
+      audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
+      audio.onpause  = () => { setIsPaused(true); };
+      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
+      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
       await audio.play();
     } catch {
       speakWebSpeech(text, rate);
     }
   }, [speakWebSpeech]);
+
+  const togglePause = useCallback(() => {
+    if (audioRef.current) {
+      // ElevenLabs HTML audio — clean pause/resume
+      if (audioRef.current.paused) {
+        audioRef.current.play();
+      } else {
+        audioRef.current.pause();
+      }
+    } else if (window.speechSynthesis) {
+      // Web Speech API fallback
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+        setIsPaused(false);
+      } else {
+        window.speechSynthesis.pause();
+        setIsPaused(true);
+      }
+    }
+  }, []);
 
   const sendMessage = useCallback(
     async (content) => {
@@ -252,12 +287,21 @@ export default function App() {
           <p className="scenario-label">{scenario.emoji} {scenario.label}</p>
         </div>
         <div className="header-right">
-          {isSpeaking && (
+          {(isSpeaking || isPaused) && (
             <div className="speaking-indicator">
-              <span>Sofía habla</span>
-              <div className="wave-bars">
-                <div className="bar" /><div className="bar" /><div className="bar" />
-              </div>
+              <button className="pause-btn" onClick={togglePause} aria-label={isPaused ? 'Resume' : 'Pause'}>
+                {isPaused ? '▶' : '⏸'}
+              </button>
+              {isPaused ? (
+                <span>En pausa</span>
+              ) : (
+                <>
+                  <span>Sofía habla</span>
+                  <div className="wave-bars">
+                    <div className="bar" /><div className="bar" /><div className="bar" />
+                  </div>
+                </>
+              )}
             </div>
           )}
           <button className="scenario-btn" onClick={() => setShowNewConfirm((v) => !v)} aria-label="New conversation" title="New conversation">
