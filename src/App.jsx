@@ -28,6 +28,7 @@ export default function App() {
 
   const recognitionRef = useRef(null);
   const voiceRef = useRef(null);
+  const pendingTranscriptRef = useRef('');
 
   // Load Spanish voice, retry until voices are available
   useEffect(() => {
@@ -132,25 +133,36 @@ export default function App() {
 
     recognition.onstart = () => setIsListening(true);
 
+    let finalSent = false;
+    pendingTranscriptRef.current = '';
+
     recognition.onresult = (event) => {
       const result = event.results[event.results.length - 1];
       const text = result[0].transcript;
+      pendingTranscriptRef.current = text;
       setTranscript(text);
       if (result.isFinal) {
+        finalSent = true;
         setIsListening(false);
         sendMessage(text);
       }
     };
 
-    recognition.onspeechend = () => recognition.stop();
-
     recognition.onerror = (e) => {
       console.error('Speech recognition error:', e.error);
       setIsListening(false);
       setTranscript('');
+      pendingTranscriptRef.current = '';
     };
 
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      // Fallback: some browsers end without firing isFinal — send whatever we captured
+      if (!finalSent && pendingTranscriptRef.current.trim()) {
+        sendMessage(pendingTranscriptRef.current);
+        pendingTranscriptRef.current = '';
+      }
+    };
 
     recognitionRef.current = recognition;
     recognition.start();
