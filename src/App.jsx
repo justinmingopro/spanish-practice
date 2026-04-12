@@ -48,6 +48,15 @@ export default function App() {
   const [hasSpeechSupport, setHasSpeechSupport] = useState(true);
   const [showNewConfirm, setShowNewConfirm] = useState(false);
 
+  const SPEEDS = [
+    { label: '1×',  rate: 1.0 },
+    { label: '¾×',  rate: 0.75 },
+    { label: '½×',  rate: 0.5 },
+  ];
+  const [speedIdx, setSpeedIdx] = useState(0);
+  const cycleSpeed = () => setSpeedIdx((i) => (i + 1) % SPEEDS.length);
+  const currentSpeed = SPEEDS[speedIdx];
+
   const recognitionRef = useRef(null);
   const voiceRef = useRef(null);
   const pendingTranscriptRef = useRef('');
@@ -74,12 +83,12 @@ export default function App() {
 
   const audioRef = useRef(null);
 
-  const speakWebSpeech = useCallback((text) => {
+  const speakWebSpeech = useCallback((text, rate = 1.0) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'es-MX';
-    utterance.rate = 0.88;
+    utterance.rate = 0.88 * rate;   // 0.88 is our natural baseline
     utterance.pitch = 1.05;
     if (voiceRef.current) utterance.voice = voiceRef.current;
     utterance.onstart = () => setIsSpeaking(true);
@@ -88,7 +97,7 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  const speakText = useCallback(async (text) => {
+  const speakText = useCallback(async (text, rate = 1.0) => {
     // Stop anything currently playing
     if (audioRef.current) {
       audioRef.current.pause();
@@ -100,7 +109,7 @@ export default function App() {
       const res = await fetch('/api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, speed: rate }),
       });
       if (!res.ok) throw new Error('ElevenLabs unavailable');
 
@@ -113,8 +122,7 @@ export default function App() {
       audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
       await audio.play();
     } catch {
-      // ElevenLabs not configured or failed — fall back to Web Speech API
-      speakWebSpeech(text);
+      speakWebSpeech(text, rate);
     }
   }, [speakWebSpeech]);
 
@@ -141,7 +149,7 @@ export default function App() {
         const data = await res.json();
         const assistantMsg = { role: 'assistant', content: data.message };
         setMessages((prev) => [...prev, assistantMsg]);
-        speakText(data.message);
+        speakText(data.message, currentSpeed.rate);
       } catch (err) {
         console.error('Chat error:', err);
         setMessages((prev) => [
@@ -233,7 +241,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: scenario.opening }]);
     setTranscript('');
     setInputText('');
-    speakText(scenario.opening);
+    speakText(scenario.opening, currentSpeed.rate);
   };
 
   return (
@@ -312,11 +320,21 @@ export default function App() {
           </button>
         </div>
 
-        {hasSpeechSupport ? (
-          <MicButton isListening={isListening} isLoading={isLoading} onStart={startListening} onStop={stopListening} />
-        ) : (
-          <p className="no-speech-notice">Speech not supported. Use Chrome for mic input.</p>
-        )}
+        <div className="mic-row">
+          {hasSpeechSupport ? (
+            <MicButton isListening={isListening} isLoading={isLoading} onStart={startListening} onStop={stopListening} />
+          ) : (
+            <p className="no-speech-notice">Speech not supported. Use Chrome for mic input.</p>
+          )}
+          <button
+            className={`speed-btn ${speedIdx > 0 ? 'slowed' : ''}`}
+            onClick={cycleSpeed}
+            title="Change playback speed"
+            aria-label="Change speech speed"
+          >
+            🐢 {currentSpeed.label}
+          </button>
+        </div>
       </div>
     </div>
   );

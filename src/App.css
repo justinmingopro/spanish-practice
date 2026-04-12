@@ -529,6 +529,60 @@
   line-height: 1.2;
 }
 
+/* ── Mic + speed row ── */
+.mic-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+}
+
+.speed-btn {
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 2px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.speed-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.speed-btn.slowed {
+  border-color: var(--accent);
+  color: #92400e;
+  background: #fef3c7;
+}
+
+@media (prefers-color-scheme: dark) {
+  .speed-btn.slowed {
+    color: #fde68a;
+    background: #2d1f06;
+  }
+}
+
+/* ── Tip text (red) ── */
+.tip-text {
+  display: block;
+  margin-top: 6px;
+  color: #dc2626;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tip-text { color: #f87171; }
+}
+
 /* ── No-speech notice ── */
 .no-speech-notice {
   font-size: 0.75rem;

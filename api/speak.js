@@ -17,8 +17,10 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'ElevenLabs not configured' });
   }
 
-  const { text } = req.body;
+  const { text, speed = 1.0 } = req.body;
   if (!text) return res.status(400).json({ error: 'text is required' });
+  // ElevenLabs speed: 0.7 (slow) – 1.2 (fast). Map our 0.5–1.0 range accordingly.
+  const elSpeed = Math.max(0.7, Math.min(1.2, speed));
 
   try {
     const elRes = await fetch(
@@ -38,6 +40,7 @@ export default async function handler(req, res) {
             similarity_boost: 0.8,
             style: 0.3,
             use_speaker_boost: true,
+            speed: elSpeed,
           },
         }),
       }

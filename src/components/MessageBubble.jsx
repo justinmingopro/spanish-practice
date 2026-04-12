@@ -1,15 +1,38 @@
 import { useState } from 'react';
 
+// Finds parenthetical tips: (Tip: ...) or (Pronunciation tip: ...)
+// and renders them in red, separate from the main Spanish dialogue.
+function parseContent(content) {
+  const parts = [];
+  const regex = /\(((?:Tip|Pronunciation)[^)]*)\)/gi;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', value: content.slice(lastIndex, match.index).trim() });
+    }
+    parts.push({ type: 'tip', value: match[0] });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    const remaining = content.slice(lastIndex).trim();
+    if (remaining) parts.push({ type: 'text', value: remaining });
+  }
+
+  return parts;
+}
+
 export default function MessageBubble({ message, onReplay }) {
   const isUser = message.role === 'user';
   const [translation, setTranslation] = useState(null);
   const [loadingTranslation, setLoadingTranslation] = useState(false);
 
+  const parts = isUser ? null : parseContent(message.content);
+
   const handleTranslate = async () => {
-    if (translation) {
-      setTranslation(null); // toggle off
-      return;
-    }
+    if (translation) { setTranslation(null); return; }
     setLoadingTranslation(true);
     try {
       const res = await fetch('/api/translate', {
@@ -28,18 +51,29 @@ export default function MessageBubble({ message, onReplay }) {
 
   return (
     <div className={`message-row ${message.role}`}>
-      <div className="avatar">
-        {isUser ? '👤' : '🇲🇽'}
-      </div>
+      <div className="avatar">{isUser ? '👤' : '🇲🇽'}</div>
       <div className="bubble-col">
-        <div className="bubble">{message.content}</div>
+        <div className="bubble">
+          {isUser ? (
+            message.content
+          ) : (
+            parts.map((part, i) =>
+              part.type === 'tip' ? (
+                <span key={i} className="tip-text">{part.value}</span>
+              ) : (
+                <span key={i}>{part.value}</span>
+              )
+            )
+          )}
+        </div>
+
         {!isUser && (
           <div className="bubble-actions">
             <button className="action-btn" onClick={() => onReplay(message.content)} title="Listen again">
               🔊 <span>escuchar</span>
             </button>
             <button
-              className={`action-btn translate-btn ${translation ? 'active' : ''}`}
+              className={`action-btn ${translation ? 'active' : ''}`}
               onClick={handleTranslate}
               disabled={loadingTranslation}
               title="Show English translation"
@@ -48,6 +82,7 @@ export default function MessageBubble({ message, onReplay }) {
             </button>
           </div>
         )}
+
         {translation && (
           <div className="translation-bubble">{translation}</div>
         )}
