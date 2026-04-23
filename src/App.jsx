@@ -63,7 +63,9 @@ export default function App() {
   const recognitionRef = useRef(null);
   const voiceRef = useRef(null);
   const pendingTranscriptRef = useRef('');
+  const sentByStopRef = useRef(false);   // prevents onend double-send
   const audioRef = useRef(null);
+  const audioUnlockedRef = useRef(false);
   // speedRef stays current even inside stale callbacks
   const speedRef = useRef(SPEEDS[0].rate);
 
@@ -112,12 +114,28 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
+  // Unlock the persistent audio element during a user gesture so iOS/CarPlay
+  // will allow programmatic playback after async operations.
+  const unlockAudio = useCallback(() => {
+    if (audioUnlockedRef.current) return;
+    if (!audioRef.current) audioRef.current = new Audio();
+    const audio = audioRef.current;
+    // Play a tiny silent data URI to satisfy iOS gesture requirement
+    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    audio.volume = 0;
+    audio.play()
+      .then(() => { audio.pause(); audio.volume = 1; audio.src = ''; audioUnlockedRef.current = true; })
+      .catch(() => {});
+  }, []);
+
   const speakText = useCallback(async (text) => {
-    // Stop anything currently playing
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
+    // Reuse the persistent audio element — don't create new Audio() each time.
+    // Creating fresh elements after async operations breaks iOS/CarPlay audio routing.
+    if (!audioRef.current) audioRef.current = new Audio();
+    const audio = audioRef.current;
+
+    audio.pause();
+    audio.src = '';
     window.speechSynthesis?.cancel();
     setIsPaused(false);
 
@@ -130,22 +148,25 @@ export default function App() {
       if (!res.ok) throw new Error('ElevenLabs unavailable');
 
       const blob = await res.blob();
+      const prevUrl = audio._blobUrl;
+      if (prevUrl) URL.revokeObjectURL(prevUrl);
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.playbackRate = speedRef.current;  // always reads live ref
-      audioRef.current = audio;
+      audio._blobUrl = url;
+
       audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
       audio.onpause  = () => { setIsPaused(true); };
-      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
-      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
+      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audio._blobUrl = null; };
+      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audio._blobUrl = null; };
+      audio.src = url;
+      audio.playbackRate = speedRef.current;
       await audio.play();
     } catch {
-      speakWebSpeech(text, rate);
+      speakWebSpeech(text);
     }
   }, [speakWebSpeech]);
 
   const togglePause = useCallback(() => {
-    if (audioRef.current) {
+    if (audioRef.current && audioRef.current.src) {
       // ElevenLabs HTML audio — clean pause/resume
       if (audioRef.current.paused) {
         audioRef.current.play();
@@ -219,6 +240,7 @@ export default function App() {
 
     let accumulatedFinal = '';
     pendingTranscriptRef.current = '';
+    sentByStopRef.current = false;   // reset for each new listening session
 
     recognition.onstart = () => setIsListening(true);
 
@@ -247,11 +269,15 @@ export default function App() {
 
     recognition.onend = () => {
       setIsListening(false);
-      const pending = pendingTranscriptRef.current.trim();
-      if (pending) {
-        sendMessage(pending);
-        pendingTranscriptRef.current = '';
+      // Only send if stopListening hasn't already sent (prevents double-send)
+      if (!sentByStopRef.current) {
+        const pending = pendingTranscriptRef.current.trim();
+        if (pending) {
+          sendMessage(pending);
+          pendingTranscriptRef.current = '';
+        }
       }
+      sentByStopRef.current = false;
     };
 
     recognitionRef.current = recognition;
@@ -260,12 +286,13 @@ export default function App() {
 
   const stopListening = useCallback(() => {
     const pending = pendingTranscriptRef.current.trim();
+    if (pending) {
+      sentByStopRef.current = true;  // flag onend to skip its send
+      pendingTranscriptRef.current = '';
+      sendMessage(pending);
+    }
     recognitionRef.current?.stop();
     setIsListening(false);
-    if (pending) {
-      sendMessage(pending);
-      pendingTranscriptRef.current = '';
-    }
   }, [sendMessage]);
 
   const switchScenario = (s) => {
@@ -329,7 +356,7 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className="app" onPointerDown={unlockAudio}>
       <header className="app-header">
         <div className="header-title">
           <h1>🇪🇸 Sofía</h1>
