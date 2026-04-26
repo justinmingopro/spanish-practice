@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 
-export default function ConversationHistory({ messages, isLoading, onReplay }) {
+export default function ConversationHistory({ messages, isLoading, onReplay, onUnlockAudio }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -11,7 +11,7 @@ export default function ConversationHistory({ messages, isLoading, onReplay }) {
   return (
     <div className="conversation">
       {messages.map((msg, i) => (
-        <MessageBubble key={i} message={msg} onReplay={onReplay} />
+        <MessageBubble key={i} message={msg} onReplay={onReplay} onUnlockAudio={onUnlockAudio} />
       ))}
       {isLoading && (
         <div className="typing-indicator">

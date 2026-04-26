@@ -229,6 +229,7 @@ export default function App() {
   const startListening = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
+    unlockAudio();   // must run synchronously inside the user gesture
     window.speechSynthesis?.cancel();
     setIsSpeaking(false);
 
@@ -468,7 +469,7 @@ export default function App() {
         </div>
       )}
 
-      <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} />
+      <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} onUnlockAudio={unlockAudio} />
 
       {transcript && <div className="transcript-preview">{transcript}</div>}
 

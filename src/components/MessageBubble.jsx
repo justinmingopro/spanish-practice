@@ -24,7 +24,7 @@ function parseContent(content) {
   return parts;
 }
 
-export default function MessageBubble({ message, onReplay }) {
+export default function MessageBubble({ message, onReplay, onUnlockAudio }) {
   const isUser = message.role === 'user';
   const [translation, setTranslation] = useState(null);
   const [loadingTranslation, setLoadingTranslation] = useState(false);
@@ -69,7 +69,7 @@ export default function MessageBubble({ message, onReplay }) {
 
         {!isUser && (
           <div className="bubble-actions">
-            <button className="action-btn" onClick={() => onReplay(message.content)} title="Listen again">
+            <button className="action-btn" onClick={() => { onUnlockAudio?.(); onReplay(message.content); }} title="Listen again">
               🔊 <span>escuchar</span>
             </button>
             <button
