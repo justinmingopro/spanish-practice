@@ -114,28 +114,23 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // Unlock the persistent audio element during a user gesture so iOS/CarPlay
-  // will allow programmatic playback after async operations.
+  // Use a dedicated throw-away element for the iOS unlock gesture —
+  // NEVER audioRef.current, to avoid any race with real playback.
   const unlockAudio = useCallback(() => {
     if (audioUnlockedRef.current) return;
-    if (!audioRef.current) audioRef.current = new Audio();
-    const audio = audioRef.current;
-    // Play a tiny silent data URI to satisfy iOS gesture requirement
-    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-    audio.volume = 0;
-    audio.play()
-      .then(() => { audio.pause(); audio.volume = 1; audio.src = ''; audioUnlockedRef.current = true; })
-      .catch(() => {});
+    audioUnlockedRef.current = true;
+    const silent = new Audio();
+    silent.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    silent.volume = 0;
+    silent.play().catch(() => {});
   }, []);
 
   const speakText = useCallback(async (text) => {
-    // Reuse the persistent audio element — don't create new Audio() each time.
-    // Creating fresh elements after async operations breaks iOS/CarPlay audio routing.
-    if (!audioRef.current) audioRef.current = new Audio();
-    const audio = audioRef.current;
-
-    audio.pause();
-    audio.src = '';
+    // Stop whatever is playing
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
     window.speechSynthesis?.cancel();
     setIsPaused(false);
 
@@ -148,17 +143,14 @@ export default function App() {
       if (!res.ok) throw new Error('ElevenLabs unavailable');
 
       const blob = await res.blob();
-      const prevUrl = audio._blobUrl;
-      if (prevUrl) URL.revokeObjectURL(prevUrl);
       const url = URL.createObjectURL(blob);
-      audio._blobUrl = url;
-
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.playbackRate = speedRef.current;
       audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
       audio.onpause  = () => { setIsPaused(true); };
-      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audio._blobUrl = null; };
-      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audio._blobUrl = null; };
-      audio.src = url;
-      audio.playbackRate = speedRef.current;
+      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
+      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
       await audio.play();
     } catch {
       speakWebSpeech(text);
@@ -166,7 +158,7 @@ export default function App() {
   }, [speakWebSpeech]);
 
   const togglePause = useCallback(() => {
-    if (audioRef.current && audioRef.current.src) {
+    if (audioRef.current) {
       // ElevenLabs HTML audio — clean pause/resume
       if (audioRef.current.paused) {
         audioRef.current.play();
