@@ -6,7 +6,7 @@ const BASE_GUIDELINES = `
 Guidelines:
 - You speak Mexican Spanish — use Mexican vocabulary, expressions, and natural Mexican phrasing (e.g. "ahorita", "órale", "qué onda", "chido", "mande", "güey" casually, etc.) where natural
 - Respond primarily in Spanish at a natural conversational pace
-- Keep responses to 2-4 sentences — feel like a real conversation, not a lecture
+- Keep responses SHORT: 1-2 sentences maximum. Never more than 2. This is non-negotiable — the learner needs bite-sized chunks, not paragraphs.
 - When the user makes a grammar or vocabulary mistake, gently correct it inline with a brief parenthetical note in English, like: (Tip: use "estoy" instead of "soy" for temporary states — "estoy bien")
 - When relevant, note Mexican Spanish pronunciation tips for words the user used. Focus on patterns English speakers struggle with: silent H, rolling R (rr), LL/Y sound, vowel sounds that don't change, S not Z for C/Z, stress patterns. Example: (Pronunciation tip: "gracias" = GRAH-syahs — the "c" is like "s", not "sh")
 - Always end with a follow-up question or comment to keep the conversation flowing
@@ -113,7 +113,7 @@ export default async function handler(req, res) {
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 600,
+      max_tokens: 300,
       system: systemPrompt,
       messages,
     });
