@@ -4,14 +4,14 @@ import MicButton from './components/MicButton';
 import './App.css';
 
 const SCENARIOS = [
-  { id: 'free',       emoji: '💬', label: 'Conversación libre',   opening: '¡Hola! Soy Sofía, tu compañera de conversación. 😊 ¿Cómo estás hoy? ¿De qué te gustaría hablar?' },
-  { id: 'restaurant', emoji: '🍽️', label: 'En el restaurante',    opening: '¡Buenas tardes! Bienvenido a La Mesa Bonita. ¿Tiene reservación, o prefiere sentarse en la terraza? Aquí tiene el menú. 😊' },
-  { id: 'market',     emoji: '🛒', label: 'En el mercado',         opening: '¡Buenos días! Pase, pase. Tenemos frutas frescas, especias, y artesanías. ¿Qué le puedo ofrecer hoy?' },
-  { id: 'family',     emoji: '👨‍👩‍👧', label: 'La familia',           opening: '¡Hola, vecino! Estaba pensando en hacer tamales este domingo con mi familia. ¿Cómo está su familia? ¿Tienen tradiciones especiales?' },
-  { id: 'faith',      emoji: '🙏', label: 'La fe',                 opening: '¡Hola! Estaba leyendo un pasaje de los Salmos esta mañana — tan hermoso. ¿Cómo va tu vida espiritual últimamente? ¿Estás en una iglesia?' },
-  { id: 'work',       emoji: '💼', label: 'El trabajo',            opening: '¡Uf, qué semana tan larga! Oye, ¿ya terminaste el informe para el jefe? Yo todavía tengo mucho que hacer antes del viernes.' },
-  { id: 'travel',     emoji: '🗺️', label: 'De viaje',              opening: '¡Hola! ¿Necesita ayuda? Soy de aquí — conozco bien la ciudad. ¿Busca algo en particular? ¿Un restaurante, un museo, quizás el mercado central?' },
-  { id: 'doctor',     emoji: '🏥', label: 'En la clínica',         opening: '¡Buenos días! Soy Sofía, la enfermera. ¿Cómo se llama usted? ¿Y cuál es el motivo de su visita hoy?' },
+  { id: 'free',       emoji: '💬', label: 'Conversación libre',   opening: '¡Hola! Soy Sofía. 😊 ¿Cómo estás hoy?' },
+  { id: 'restaurant', emoji: '🍽️', label: 'En el restaurante',    opening: '¡Buenas tardes! Bienvenido a La Mesa Bonita. ¿Qué le puedo traer?' },
+  { id: 'market',     emoji: '🛒', label: 'En el mercado',         opening: '¡Buenos días! ¿Qué le puedo ofrecer hoy?' },
+  { id: 'family',     emoji: '👨‍👩‍👧', label: 'La familia',           opening: '¡Hola, vecino! ¿Cómo está tu familia?' },
+  { id: 'faith',      emoji: '🙏', label: 'La fe',                 opening: '¡Hola! ¿Cómo va tu vida espiritual últimamente?' },
+  { id: 'work',       emoji: '💼', label: 'El trabajo',            opening: '¡Qué semana! ¿Cómo te va en el trabajo?' },
+  { id: 'travel',     emoji: '🗺️', label: 'De viaje',              opening: '¡Hola! ¿Necesita ayuda? ¿Qué busca?' },
+  { id: 'doctor',     emoji: '🏥', label: 'En la clínica',         opening: '¡Buenos días! ¿Cuál es el motivo de su visita?' },
 ];
 
 const STORAGE_KEY = 'sofia-conversation';
@@ -190,12 +190,16 @@ export default function App() {
       setTranscript('');
       setIsLoading(true);
 
+      // Keep only the last 16 messages for the API call — prevents timeouts
+      // and token limit errors as conversations grow long.
+      const trimmedForApi = updatedMessages.slice(-16);
+
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            messages: updatedMessages,
+            messages: trimmedForApi,
             scenario: scenario.id,
             ...(drillType && drillTopic ? { drillType, drillTopic } : {}),
           }),
