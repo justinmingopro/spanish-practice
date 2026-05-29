@@ -72,6 +72,7 @@ export default function App() {
   const pendingTranscriptRef = useRef('');
   const sentByStopRef = useRef(false);   // prevents onend double-send
   const audioRef = useRef(null);
+  const audioBlobUrlRef = useRef(null);  // tracks current blob URL for cleanup
   const audioUnlockedRef = useRef(false);
   // speedRef stays current even inside stale callbacks
   const speedRef = useRef(SPEEDS[0].rate);
@@ -126,25 +127,30 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // Use a dedicated throw-away element for the iOS unlock gesture —
-  // NEVER audioRef.current, to avoid any race with real playback.
+  // Create and silently play the persistent Audio element during the first user gesture.
+  // Reusing this same element for all TTS ensures iOS routes every subsequent auto-response
+  // to CarPlay (or whatever the active output is) — not just manually-tapped Escuchar buttons.
   const unlockAudio = useCallback(() => {
     if (audioUnlockedRef.current) return;
     audioUnlockedRef.current = true;
-    const silent = new Audio();
-    silent.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-    silent.volume = 0;
-    silent.play().catch(() => {});
+    const audio = new Audio();
+    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    audio.volume = 0;
+    audio.play().catch(() => {});
+    audioRef.current = audio;  // keep this element — speakText will reuse it
   }, []);
 
   const speakText = useCallback(async (text) => {
-    // Stop whatever is playing
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
+    // Pause current playback but keep the element — nulling it would lose the CarPlay route.
+    if (audioRef.current) audioRef.current.pause();
     window.speechSynthesis?.cancel();
     setIsPaused(false);
+
+    // Revoke previous blob URL before creating a new one
+    if (audioBlobUrlRef.current) {
+      URL.revokeObjectURL(audioBlobUrlRef.current);
+      audioBlobUrlRef.current = null;
+    }
 
     try {
       const res = await fetch('/api/speak', {
@@ -156,13 +162,30 @@ export default function App() {
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
+      audioBlobUrlRef.current = url;
+
+      // Reuse the element created in unlockAudio (or create one if somehow missing).
+      // Changing src on the same element preserves the iOS audio route established
+      // during the first user gesture, so auto-responses reach CarPlay too.
+      const audio = audioRef.current ?? new Audio();
       audioRef.current = audio;
+      audio.volume = 1;
+      audio.src = url;
       audio.playbackRate = speedRef.current;
       audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
       audio.onpause  = () => { setIsPaused(true); };
-      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
-      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
+      audio.onended  = () => {
+        setIsSpeaking(false);
+        setIsPaused(false);
+        URL.revokeObjectURL(url);
+        audioBlobUrlRef.current = null;
+      };
+      audio.onerror  = () => {
+        setIsSpeaking(false);
+        setIsPaused(false);
+        URL.revokeObjectURL(url);
+        audioBlobUrlRef.current = null;
+      };
       await audio.play();
     } catch {
       speakWebSpeech(text);
