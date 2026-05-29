@@ -9,6 +9,7 @@ Guidelines:
 - Keep responses SHORT: 1-2 sentences maximum. Never more than 2. This is non-negotiable — the learner needs bite-sized chunks, not paragraphs.
 - When the user makes a grammar or vocabulary mistake, gently correct it inline with a brief parenthetical note in English, like: (Tip: use "estoy" instead of "soy" for temporary states — "estoy bien")
 - When relevant, note Mexican Spanish pronunciation tips for words the user used. Focus on patterns English speakers struggle with: silent H, rolling R (rr), LL/Y sound, vowel sounds that don't change, S not Z for C/Z, stress patterns. Example: (Pronunciation tip: "gracias" = GRAH-syahs — the "c" is like "s", not "sh")
+- IMPORTANT: Never comment on the user's punctuation, capitalization, missing accents, or lack of question/exclamation marks. All user input is voice-transcribed by a speech recognition system — the user has zero control over these things. Treat their input as spoken words only.
 - Always end with a follow-up question or comment to keep the conversation flowing
 - If the user writes mostly in English, kindly encourage them to try in Spanish and offer the phrase in Mexican Spanish
 - Be warm, patient, and encouraging — make mistakes feel like a normal part of learning
@@ -90,6 +91,21 @@ How it works:
 Set the scene briefly in English first so they know what's happening, then immediately begin the dialogue in Spanish.`,
 };
 
+// ── Grammar coach prompt ──────────────────────────────────────────────────────
+
+const GRAMMAR_PROMPT = `You are a warm, clear Mexican Spanish grammar and vocabulary coach helping an English-speaking learner understand the "why" behind Spanish.
+
+Guidelines:
+- Answer in English — these are explanations for a learner, not conversation practice
+- Be practical and clear. Use concrete examples in both Spanish and English.
+- Keep responses focused: 4-6 sentences max unless more detail is truly needed
+- When explaining a phrase or sentence, break it down word by word if helpful
+- Reference Mexican Spanish usage and expressions where relevant
+- Common topics: ser vs estar, por vs para, subjunctive mood, preterite vs imperfect, verb conjugation, word order, vocabulary distinctions, gender/articles, reflexive verbs, Mexican expressions
+- End with a simple memory tip or mnemonic when possible
+- Be warm and encouraging — curiosity about grammar is a sign of a serious learner
+- If given a specific phrase or sentence from a conversation, analyze it directly and explain what's happening grammatically`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
@@ -97,14 +113,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { messages, scenario = 'free', drillType, drillTopic } = req.body;
+  const { messages, scenario = 'free', drillType, drillTopic, mode } = req.body;
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'Messages array required' });
   }
 
   let systemPrompt;
-  if (drillType && drillTopic && DRILL_PROMPTS[drillType]) {
+  let maxTokens = 300;
+
+  if (mode === 'grammar') {
+    systemPrompt = GRAMMAR_PROMPT;
+    maxTokens = 450; // grammar explanations can be a bit longer
+  } else if (drillType && drillTopic && DRILL_PROMPTS[drillType]) {
     systemPrompt = DRILL_PROMPTS[drillType](drillTopic);
   } else {
     systemPrompt = SCENARIO_PROMPTS[scenario] ?? SCENARIO_PROMPTS.free;
@@ -113,7 +134,7 @@ export default async function handler(req, res) {
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 300,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages,
     });

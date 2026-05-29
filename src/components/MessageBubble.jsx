@@ -24,7 +24,7 @@ function parseContent(content) {
   return parts;
 }
 
-export default function MessageBubble({ message, onReplay, onUnlockAudio }) {
+export default function MessageBubble({ message, onReplay, onUnlockAudio, onAskGrammar }) {
   const isUser = message.role === 'user';
   const [translation, setTranslation] = useState(null);
   const [loadingTranslation, setLoadingTranslation] = useState(false);
@@ -80,6 +80,15 @@ export default function MessageBubble({ message, onReplay, onUnlockAudio }) {
             >
               {loadingTranslation ? '⏳' : '🇺🇸'} <span>{translation ? 'hide' : 'translate'}</span>
             </button>
+            {onAskGrammar && (
+              <button
+                className="action-btn"
+                onClick={() => onAskGrammar(message.content)}
+                title="Ask about this grammar"
+              >
+                ❓ <span>explain</span>
+              </button>
+            )}
           </div>
         )}
 

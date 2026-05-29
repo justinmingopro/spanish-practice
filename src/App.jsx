@@ -52,6 +52,13 @@ export default function App() {
   const [drillType, setDrillType] = useState(null);   // 'shadowing' | 'vocabulary' | 'dialogue'
   const [drillTopic, setDrillTopic] = useState(null); // free-text topic label
 
+  // Grammar panel — separate from main conversation, never affects it
+  const [showGrammarPanel, setShowGrammarPanel] = useState(false);
+  const [grammarMessages, setGrammarMessages] = useState([]);
+  const [grammarInput, setGrammarInput] = useState('');
+  const [grammarLoading, setGrammarLoading] = useState(false);
+  const grammarBottomRef = useRef(null);
+
   const SPEEDS = [
     { label: '1×',  rate: 1.0 },
     { label: '¾×',  rate: 0.75 },
@@ -84,6 +91,11 @@ export default function App() {
   useEffect(() => {
     saveState(scenario.id, messages);
   }, [scenario.id, messages]);
+
+  // Auto-scroll grammar panel to bottom
+  useEffect(() => {
+    grammarBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [grammarMessages, grammarLoading]);
 
   useEffect(() => {
     const loadVoice = () => {
@@ -176,6 +188,56 @@ export default function App() {
       }
     }
   }, []);
+
+  // Opens the grammar panel, optionally pre-sending a question about a specific message
+  const openGrammarPanel = useCallback((context) => {
+    setShowGrammarPanel(true);
+    if (context) {
+      // Strip parenthetical tips before sending to grammar coach
+      const cleaned = context.replace(/\(((?:Tip|Pronunciation)[^)]*)\)/gi, '').trim();
+      const question = `Please explain this phrase Sofía said: "${cleaned}"`;
+      setGrammarInput('');
+      // Auto-send the context question
+      setTimeout(async () => {
+        const userMsg = { role: 'user', content: question };
+        setGrammarMessages((prev) => {
+          const updated = [...prev, userMsg];
+          sendGrammarRequest(updated);
+          return updated;
+        });
+      }, 100);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sendGrammarRequest = async (history) => {
+    setGrammarLoading(true);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history.slice(-12), mode: 'grammar' }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setGrammarMessages((prev) => [...prev, { role: 'assistant', content: data.message }]);
+    } catch {
+      setGrammarMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, couldn\'t get an explanation. Please try again.' }]);
+    } finally {
+      setGrammarLoading(false);
+    }
+  };
+
+  const sendGrammarMessage = () => {
+    const text = grammarInput.trim();
+    if (!text || grammarLoading) return;
+    const userMsg = { role: 'user', content: text };
+    setGrammarInput('');
+    setGrammarMessages((prev) => {
+      const updated = [...prev, userMsg];
+      sendGrammarRequest(updated);
+      return updated;
+    });
+  };
 
   const sendMessage = useCallback(
     async (content) => {
@@ -383,6 +445,9 @@ export default function App() {
           <button className={`scenario-btn ${showDrillPanel ? 'active' : ''} ${drillType ? 'drill-active' : ''}`} onClick={() => setShowDrillPanel((v) => !v)} aria-label="Drill mode" title="Drill mode">
             🎯
           </button>
+          <button className={`scenario-btn ${showGrammarPanel ? 'active' : ''}`} onClick={() => setShowGrammarPanel((v) => !v)} aria-label="Grammar questions" title="Ask a grammar question">
+            ❓
+          </button>
           <button className="scenario-btn" onClick={() => setShowScenarios((v) => !v)} aria-label="Change scenario" title="Change scenario">
             🎭
           </button>
@@ -465,7 +530,48 @@ export default function App() {
         </div>
       )}
 
-      <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} onUnlockAudio={unlockAudio} />
+      {/* Grammar Q&A panel — floats over the conversation, doesn't affect it */}
+      {showGrammarPanel && (
+        <div className="grammar-panel">
+          <div className="grammar-panel-header">
+            <span>❓ Preguntas de gramática</span>
+            <button className="grammar-close-btn" onClick={() => setShowGrammarPanel(false)}>✕</button>
+          </div>
+          <div className="grammar-messages">
+            {grammarMessages.length === 0 && (
+              <p className="grammar-empty">Ask me anything about Spanish grammar, vocabulary, or expressions! You can also tap the ❓ button on any of Sofía's messages.</p>
+            )}
+            {grammarMessages.map((msg, i) => (
+              <div key={i} className={`grammar-bubble ${msg.role}`}>
+                {msg.role === 'assistant' ? '📚 ' : '👤 '}{msg.content}
+              </div>
+            ))}
+            {grammarLoading && (
+              <div className="grammar-bubble assistant grammar-loading">
+                <span className="dots"><span /><span /><span /></span>
+              </div>
+            )}
+            <div ref={grammarBottomRef} />
+          </div>
+          <div className="grammar-input-row">
+            <input
+              type="text"
+              value={grammarInput}
+              onChange={(e) => setGrammarInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendGrammarMessage()}
+              placeholder="e.g. What's the difference between por and para?"
+              disabled={grammarLoading}
+            />
+            <button
+              className="send-btn"
+              onClick={sendGrammarMessage}
+              disabled={grammarLoading || !grammarInput.trim()}
+            >↑</button>
+          </div>
+        </div>
+      )}
+
+      <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} onUnlockAudio={unlockAudio} onAskGrammar={openGrammarPanel} />
 
       {transcript && <div className="transcript-preview">{transcript}</div>}
 
