@@ -542,8 +542,19 @@ export default function App() {
               <p className="grammar-empty">Ask me anything about Spanish grammar, vocabulary, or expressions! You can also tap the ❓ button on any of Sofía's messages.</p>
             )}
             {grammarMessages.map((msg, i) => (
-              <div key={i} className={`grammar-bubble ${msg.role}`}>
-                {msg.role === 'assistant' ? '📚 ' : '👤 '}{msg.content}
+              <div key={i} className={`grammar-msg-wrap ${msg.role}`}>
+                <div className={`grammar-bubble ${msg.role}`}>
+                  {msg.role === 'assistant' ? '📚 ' : '👤 '}{msg.content}
+                </div>
+                {msg.role === 'assistant' && (
+                  <button
+                    className="grammar-listen-btn"
+                    onClick={() => { unlockAudio(); speakText(msg.content); }}
+                    title="Listen to this explanation"
+                  >
+                    🔊 <span>escuchar</span>
+                  </button>
+                )}
               </div>
             ))}
             {grammarLoading && (
