@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ConversationHistory from './components/ConversationHistory';
 import MicButton from './components/MicButton';
+import Translator from './components/Translator';
 import './App.css';
 
 const SCENARIOS = [
@@ -37,26 +38,27 @@ export default function App() {
   const savedScenario = SCENARIOS.find((s) => s.id === saved?.scenarioId) ?? SCENARIOS[0];
   const savedMessages = saved?.messages?.length ? saved.messages : [{ role: 'assistant', content: savedScenario.opening }];
 
-  const [scenario, setScenario] = useState(savedScenario);
-  const [showScenarios, setShowScenarios] = useState(false);
-  const [messages, setMessages] = useState(savedMessages);
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [inputText, setInputText] = useState('');
-  const [transcript, setTranscript] = useState('');
+  const [activeTab,        setActiveTab]        = useState('sofia'); // 'sofia' | 'translator'
+  const [scenario,         setScenario]         = useState(savedScenario);
+  const [showScenarios,    setShowScenarios]    = useState(false);
+  const [messages,         setMessages]         = useState(savedMessages);
+  const [isListening,      setIsListening]      = useState(false);
+  const [isSpeaking,       setIsSpeaking]       = useState(false);
+  const [isPaused,         setIsPaused]         = useState(false);
+  const [isLoading,        setIsLoading]        = useState(false);
+  const [inputText,        setInputText]        = useState('');
+  const [transcript,       setTranscript]       = useState('');
   const [hasSpeechSupport, setHasSpeechSupport] = useState(true);
-  const [showNewConfirm, setShowNewConfirm] = useState(false);
-  const [showDrillPanel, setShowDrillPanel] = useState(false);
-  const [drillType, setDrillType] = useState(null);   // 'shadowing' | 'vocabulary' | 'dialogue'
-  const [drillTopic, setDrillTopic] = useState(null); // free-text topic label
+  const [showNewConfirm,   setShowNewConfirm]   = useState(false);
+  const [showDrillPanel,   setShowDrillPanel]   = useState(false);
+  const [drillType,        setDrillType]        = useState(null);
+  const [drillTopic,       setDrillTopic]       = useState(null);
 
-  // Grammar panel — separate from main conversation, never affects it
+  // Grammar panel
   const [showGrammarPanel, setShowGrammarPanel] = useState(false);
-  const [grammarMessages, setGrammarMessages] = useState([]);
-  const [grammarInput, setGrammarInput] = useState('');
-  const [grammarLoading, setGrammarLoading] = useState(false);
+  const [grammarMessages,  setGrammarMessages]  = useState([]);
+  const [grammarInput,     setGrammarInput]     = useState('');
+  const [grammarLoading,   setGrammarLoading]   = useState(false);
   const grammarBottomRef = useRef(null);
 
   const SPEEDS = [
@@ -67,32 +69,26 @@ export default function App() {
   const [speedIdx, setSpeedIdx] = useState(0);
   const currentSpeed = SPEEDS[speedIdx];
 
-  const recognitionRef = useRef(null);
-  const voiceRef = useRef(null);
+  const recognitionRef     = useRef(null);
+  const voiceRef           = useRef(null);
   const pendingTranscriptRef = useRef('');
-  const sentByStopRef = useRef(false);   // prevents onend double-send
-  const audioRef = useRef(null);
-  const audioUnlockedRef = useRef(false);
-  // speedRef stays current even inside stale callbacks
-  const speedRef = useRef(SPEEDS[0].rate);
+  const sentByStopRef      = useRef(false);
+  const audioRef           = useRef(null);
+  const audioUnlockedRef   = useRef(false);
+  const speedRef           = useRef(SPEEDS[0].rate);
 
   const cycleSpeed = () => {
-    const nextIdx = (speedIdx + 1) % SPEEDS.length;
+    const nextIdx  = (speedIdx + 1) % SPEEDS.length;
     const nextRate = SPEEDS[nextIdx].rate;
     speedRef.current = nextRate;
     setSpeedIdx(nextIdx);
-    // Apply instantly to already-playing ElevenLabs audio
-    if (audioRef.current) {
-      audioRef.current.playbackRate = nextRate;
-    }
+    if (audioRef.current) audioRef.current.playbackRate = nextRate;
   };
 
-  // Persist conversation whenever messages or scenario change
   useEffect(() => {
     saveState(scenario.id, messages);
   }, [scenario.id, messages]);
 
-  // Auto-scroll grammar panel to bottom
   useEffect(() => {
     grammarBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [grammarMessages, grammarLoading]);
@@ -116,18 +112,16 @@ export default function App() {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'es-MX';
-    utterance.rate = 0.88 * speedRef.current;  // always reads live ref
+    utterance.lang  = 'es-MX';
+    utterance.rate  = 0.88 * speedRef.current;
     utterance.pitch = 1.05;
     if (voiceRef.current) utterance.voice = voiceRef.current;
     utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
+    utterance.onend   = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // Use a dedicated throw-away element for the iOS unlock gesture —
-  // NEVER audioRef.current, to avoid any race with real playback.
   const unlockAudio = useCallback(() => {
     if (audioUnlockedRef.current) return;
     audioUnlockedRef.current = true;
@@ -138,11 +132,7 @@ export default function App() {
   }, []);
 
   const speakText = useCallback(async (text) => {
-    // Stop whatever is playing
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     window.speechSynthesis?.cancel();
     setIsPaused(false);
 
@@ -154,15 +144,15 @@ export default function App() {
       });
       if (!res.ok) throw new Error('ElevenLabs unavailable');
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const blob  = await res.blob();
+      const url   = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
       audio.playbackRate = speedRef.current;
-      audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
-      audio.onpause  = () => { setIsPaused(true); };
-      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
-      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
+      audio.onplay  = () => { setIsSpeaking(true);  setIsPaused(false); };
+      audio.onpause = () => { setIsPaused(true); };
+      audio.onended = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
+      audio.onerror = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
       await audio.play();
     } catch {
       speakWebSpeech(text);
@@ -171,33 +161,20 @@ export default function App() {
 
   const togglePause = useCallback(() => {
     if (audioRef.current) {
-      // ElevenLabs HTML audio — clean pause/resume
-      if (audioRef.current.paused) {
-        audioRef.current.play();
-      } else {
-        audioRef.current.pause();
-      }
+      if (audioRef.current.paused) { audioRef.current.play(); }
+      else { audioRef.current.pause(); }
     } else if (window.speechSynthesis) {
-      // Web Speech API fallback
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-        setIsPaused(false);
-      } else {
-        window.speechSynthesis.pause();
-        setIsPaused(true);
-      }
+      if (window.speechSynthesis.paused) { window.speechSynthesis.resume(); setIsPaused(false); }
+      else { window.speechSynthesis.pause(); setIsPaused(true); }
     }
   }, []);
 
-  // Opens the grammar panel, optionally pre-sending a question about a specific message
   const openGrammarPanel = useCallback((context) => {
     setShowGrammarPanel(true);
     if (context) {
-      // Strip parenthetical tips before sending to grammar coach
-      const cleaned = context.replace(/\(((?:Tip|Pronunciation)[^)]*)\)/gi, '').trim();
+      const cleaned  = context.replace(/\(((?:Tip|Pronunciation)[^)]*)\)/gi, '').trim();
       const question = `Please explain this phrase Sofía said: "${cleaned}"`;
       setGrammarInput('');
-      // Auto-send the context question
       setTimeout(async () => {
         const userMsg = { role: 'user', content: question };
         setGrammarMessages((prev) => {
@@ -221,7 +198,7 @@ export default function App() {
       const data = await res.json();
       setGrammarMessages((prev) => [...prev, { role: 'assistant', content: data.message }]);
     } catch {
-      setGrammarMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, couldn\'t get an explanation. Please try again.' }]);
+      setGrammarMessages((prev) => [...prev, { role: 'assistant', content: "Sorry, couldn't get an explanation. Please try again." }]);
     } finally {
       setGrammarLoading(false);
     }
@@ -244,7 +221,7 @@ export default function App() {
       const text = content.trim();
       if (!text || isLoading) return;
 
-      const userMsg = { role: 'user', content: text };
+      const userMsg         = { role: 'user', content: text };
       const updatedMessages = [...messages, userMsg];
 
       setMessages(updatedMessages);
@@ -252,8 +229,6 @@ export default function App() {
       setTranscript('');
       setIsLoading(true);
 
-      // Keep only the last 16 messages for the API call — prevents timeouts
-      // and token limit errors as conversations grow long.
       const trimmedForApi = updatedMessages.slice(-16);
 
       try {
@@ -287,19 +262,19 @@ export default function App() {
   const startListening = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
-    unlockAudio();   // must run synchronously inside the user gesture
+    unlockAudio();
     window.speechSynthesis?.cancel();
     setIsSpeaking(false);
 
     const recognition = new SpeechRecognition();
-    recognition.lang = 'es-MX';
-    recognition.continuous = true;
-    recognition.interimResults = true;
+    recognition.lang            = 'es-MX';
+    recognition.continuous      = true;
+    recognition.interimResults  = true;
     recognition.maxAlternatives = 1;
 
     let accumulatedFinal = '';
     pendingTranscriptRef.current = '';
-    sentByStopRef.current = false;   // reset for each new listening session
+    sentByStopRef.current = false;
 
     recognition.onstart = () => setIsListening(true);
 
@@ -307,11 +282,8 @@ export default function App() {
       let interim = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const r = event.results[i];
-        if (r.isFinal) {
-          accumulatedFinal += r[0].transcript + ' ';
-        } else {
-          interim += r[0].transcript;
-        }
+        if (r.isFinal) { accumulatedFinal += r[0].transcript + ' '; }
+        else            { interim += r[0].transcript; }
       }
       const display = (accumulatedFinal + interim).trim();
       pendingTranscriptRef.current = display;
@@ -328,25 +300,21 @@ export default function App() {
 
     recognition.onend = () => {
       setIsListening(false);
-      // Only send if stopListening hasn't already sent (prevents double-send)
       if (!sentByStopRef.current) {
         const pending = pendingTranscriptRef.current.trim();
-        if (pending) {
-          sendMessage(pending);
-          pendingTranscriptRef.current = '';
-        }
+        if (pending) { sendMessage(pending); pendingTranscriptRef.current = ''; }
       }
       sentByStopRef.current = false;
     };
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [sendMessage]);
+  }, [sendMessage, unlockAudio]);
 
   const stopListening = useCallback(() => {
     const pending = pendingTranscriptRef.current.trim();
     if (pending) {
-      sentByStopRef.current = true;  // flag onend to skip its send
+      sentByStopRef.current = true;
       pendingTranscriptRef.current = '';
       sendMessage(pending);
     }
@@ -393,7 +361,6 @@ export default function App() {
     setMessages([opening]);
     setTranscript('');
     setInputText('');
-    // Kick off the drill — send an empty first user turn so Sofía starts
     setTimeout(() => sendMessage('¡Listo! Empecemos.'), 300);
   };
 
@@ -416,202 +383,220 @@ export default function App() {
 
   return (
     <div className="app" onPointerDown={unlockAudio}>
+
+      {/* ── Header ── */}
       <header className="app-header">
         <div className="header-title">
-          <h1>🇪🇸 Sofía</h1>
-          <p className="scenario-label">{scenario.emoji} {scenario.label}</p>
+          <h1>{activeTab === 'translator' ? '🔄 Translator' : '🇪🇸 Sofía'}</h1>
+          <p className="scenario-label">
+            {activeTab === 'translator'
+              ? 'English ↔ Spanish'
+              : `${scenario.emoji} ${scenario.label}`}
+          </p>
         </div>
         <div className="header-right">
-          {(isSpeaking || isPaused) && (
-            <div className="speaking-indicator">
-              <button className="pause-btn" onClick={togglePause} aria-label={isPaused ? 'Resume' : 'Pause'}>
-                {isPaused ? '▶' : '⏸'}
-              </button>
-              {isPaused ? (
-                <span>En pausa</span>
-              ) : (
-                <>
-                  <span>Sofía habla</span>
-                  <div className="wave-bars">
-                    <div className="bar" /><div className="bar" /><div className="bar" />
-                  </div>
-                </>
+          {activeTab === 'sofia' && (
+            <>
+              {(isSpeaking || isPaused) && (
+                <div className="speaking-indicator">
+                  <button className="pause-btn" onClick={togglePause} aria-label={isPaused ? 'Resume' : 'Pause'}>
+                    {isPaused ? '▶' : '⏸'}
+                  </button>
+                  {isPaused ? (
+                    <span>En pausa</span>
+                  ) : (
+                    <>
+                      <span>Sofía habla</span>
+                      <div className="wave-bars">
+                        <div className="bar" /><div className="bar" /><div className="bar" />
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
-            </div>
+              <button className="scenario-btn" onClick={() => setShowNewConfirm((v) => !v)} aria-label="New conversation" title="New conversation">🔄</button>
+              <button className={`scenario-btn ${showDrillPanel ? 'active' : ''} ${drillType ? 'drill-active' : ''}`} onClick={() => setShowDrillPanel((v) => !v)} aria-label="Drill mode" title="Drill mode">🎯</button>
+              <button className={`scenario-btn ${showGrammarPanel ? 'active' : ''}`} onClick={() => setShowGrammarPanel((v) => !v)} aria-label="Grammar questions" title="Ask a grammar question">❓</button>
+              <button className="scenario-btn" onClick={() => setShowScenarios((v) => !v)} aria-label="Change scenario" title="Change scenario">🎭</button>
+            </>
           )}
-          <button className="scenario-btn" onClick={() => setShowNewConfirm((v) => !v)} aria-label="New conversation" title="New conversation">
-            🔄
-          </button>
-          <button className={`scenario-btn ${showDrillPanel ? 'active' : ''} ${drillType ? 'drill-active' : ''}`} onClick={() => setShowDrillPanel((v) => !v)} aria-label="Drill mode" title="Drill mode">
-            🎯
-          </button>
-          <button className={`scenario-btn ${showGrammarPanel ? 'active' : ''}`} onClick={() => setShowGrammarPanel((v) => !v)} aria-label="Grammar questions" title="Ask a grammar question">
-            ❓
-          </button>
-          <button className="scenario-btn" onClick={() => setShowScenarios((v) => !v)} aria-label="Change scenario" title="Change scenario">
-            🎭
-          </button>
         </div>
       </header>
 
-      {showNewConfirm && (
-        <div className="confirm-bar">
-          <span>¿Empezar una conversación nueva?</span>
-          <button className="confirm-yes" onClick={startNewConversation}>Sí, empezar</button>
-          <button className="confirm-no" onClick={() => setShowNewConfirm(false)}>Cancelar</button>
-        </div>
-      )}
-
-      {/* Active drill banner */}
-      {drillType && (
-        <div className="drill-banner">
-          <span>{DRILL_TYPES.find(d => d.id === drillType)?.emoji} <strong>{DRILL_TYPES.find(d => d.id === drillType)?.label}</strong> — {drillTopic}</span>
-          <button className="drill-exit-btn" onClick={exitDrill}>✕ Salir del drill</button>
-        </div>
-      )}
-
-      {/* Drill panel */}
-      {showDrillPanel && (
-        <div className="drill-panel">
-          <p className="drill-panel-title">🎯 Modo Drill — Elige un tipo y un tema</p>
-
-          <div className="drill-type-row">
-            {DRILL_TYPES.map((dt) => (
-              <button
-                key={dt.id}
-                className={`drill-type-card ${drillType === dt.id ? 'active' : ''}`}
-                onClick={() => setDrillType(dt.id)}
-              >
-                <span className="drill-type-emoji">{dt.emoji}</span>
-                <span className="drill-type-label">{dt.label}</span>
-                <span className="drill-type-desc">{dt.desc}</span>
-              </button>
-            ))}
-          </div>
-
-          <p className="drill-section-label">Elige un tema:</p>
-          <div className="drill-topic-grid">
-            {DRILL_TOPICS.map((t) => (
-              <button
-                key={t}
-                className={`drill-topic-chip ${drillTopic === t ? 'active' : ''}`}
-                onClick={() => setDrillTopic(t)}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-
-          <button
-            className="drill-start-btn"
-            disabled={!drillType || !drillTopic}
-            onClick={() => startDrill(drillType, drillTopic)}
-          >
-            ¡Empezar el drill! →
-          </button>
-        </div>
-      )}
-
-      {showScenarios && (
-        <div className="scenario-panel">
-          <p className="scenario-panel-title">Elige una situación</p>
-          <div className="scenario-grid">
-            {SCENARIOS.map((s) => (
-              <button
-                key={s.id}
-                className={`scenario-card ${scenario.id === s.id ? 'active' : ''}`}
-                onClick={() => switchScenario(s)}
-              >
-                <span className="scenario-card-emoji">{s.emoji}</span>
-                <span className="scenario-card-label">{s.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Grammar Q&A panel — floats over the conversation, doesn't affect it */}
-      {showGrammarPanel && (
-        <div className="grammar-panel">
-          <div className="grammar-panel-header">
-            <span>❓ Preguntas de gramática</span>
-            <button className="grammar-close-btn" onClick={() => setShowGrammarPanel(false)}>✕</button>
-          </div>
-          <div className="grammar-messages">
-            {grammarMessages.length === 0 && (
-              <p className="grammar-empty">Ask me anything about Spanish grammar, vocabulary, or expressions! You can also tap the ❓ button on any of Sofía's messages.</p>
-            )}
-            {grammarMessages.map((msg, i) => (
-              <div key={i} className={`grammar-bubble ${msg.role}`}>
-                {msg.role === 'assistant' ? '📚 ' : '👤 '}{msg.content}
-              </div>
-            ))}
-            {grammarLoading && (
-              <div className="grammar-bubble assistant grammar-loading">
-                <span className="dots"><span /><span /><span /></span>
-              </div>
-            )}
-            <div ref={grammarBottomRef} />
-          </div>
-          <div className="grammar-input-row">
-            <input
-              type="text"
-              value={grammarInput}
-              onChange={(e) => setGrammarInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendGrammarMessage()}
-              placeholder="e.g. What's the difference between por and para?"
-              disabled={grammarLoading}
-            />
-            <button
-              className="send-btn"
-              onClick={sendGrammarMessage}
-              disabled={grammarLoading || !grammarInput.trim()}
-            >↑</button>
-          </div>
-        </div>
-      )}
-
-      <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} onUnlockAudio={unlockAudio} onAskGrammar={openGrammarPanel} />
-
-      {transcript && <div className="transcript-preview">{transcript}</div>}
-
-      <div className="input-area">
-        <div className="text-input-row">
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage(inputText)}
-            placeholder="O escribe aquí..."
-            disabled={isLoading || isListening}
-            aria-label="Type in Spanish"
-          />
-          <button
-            className="send-btn"
-            onClick={() => sendMessage(inputText)}
-            disabled={isLoading || isListening || !inputText.trim()}
-            aria-label="Send"
-          >
-            ↑
-          </button>
-        </div>
-
-        <div className="mic-row">
-          {hasSpeechSupport ? (
-            <MicButton isListening={isListening} isLoading={isLoading} onStart={startListening} onStop={stopListening} />
-          ) : (
-            <p className="no-speech-notice">Speech not supported. Use Chrome for mic input.</p>
-          )}
-          <button
-            className={`speed-btn ${speedIdx > 0 ? 'slowed' : ''}`}
-            onClick={cycleSpeed}
-            title="Change playback speed"
-            aria-label="Change speech speed"
-          >
-            🐢 {currentSpeed.label}
-          </button>
-        </div>
+      {/* ── Tab bar ── */}
+      <div className="tab-bar">
+        <button
+          className={`tab-btn ${activeTab === 'sofia' ? 'active' : ''}`}
+          onClick={() => setActiveTab('sofia')}
+        >
+          💬 Sofía
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'translator' ? 'active' : ''}`}
+          onClick={() => setActiveTab('translator')}
+        >
+          🔄 Translate
+        </button>
       </div>
+
+      {/* ── Sofía tab ── */}
+      {activeTab === 'sofia' && (
+        <>
+          {showNewConfirm && (
+            <div className="confirm-bar">
+              <span>¿Empezar una conversación nueva?</span>
+              <button className="confirm-yes" onClick={startNewConversation}>Sí, empezar</button>
+              <button className="confirm-no" onClick={() => setShowNewConfirm(false)}>Cancelar</button>
+            </div>
+          )}
+
+          {drillType && (
+            <div className="drill-banner">
+              <span>{DRILL_TYPES.find(d => d.id === drillType)?.emoji} <strong>{DRILL_TYPES.find(d => d.id === drillType)?.label}</strong> — {drillTopic}</span>
+              <button className="drill-exit-btn" onClick={exitDrill}>✕ Salir del drill</button>
+            </div>
+          )}
+
+          {showDrillPanel && (
+            <div className="drill-panel">
+              <p className="drill-panel-title">🎯 Modo Drill — Elige un tipo y un tema</p>
+              <div className="drill-type-row">
+                {DRILL_TYPES.map((dt) => (
+                  <button
+                    key={dt.id}
+                    className={`drill-type-card ${drillType === dt.id ? 'active' : ''}`}
+                    onClick={() => setDrillType(dt.id)}
+                  >
+                    <span className="drill-type-emoji">{dt.emoji}</span>
+                    <span className="drill-type-label">{dt.label}</span>
+                    <span className="drill-type-desc">{dt.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="drill-section-label">Elige un tema:</p>
+              <div className="drill-topic-grid">
+                {DRILL_TOPICS.map((t) => (
+                  <button
+                    key={t}
+                    className={`drill-topic-chip ${drillTopic === t ? 'active' : ''}`}
+                    onClick={() => setDrillTopic(t)}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="drill-start-btn"
+                disabled={!drillType || !drillTopic}
+                onClick={() => startDrill(drillType, drillTopic)}
+              >
+                ¡Empezar el drill! →
+              </button>
+            </div>
+          )}
+
+          {showScenarios && (
+            <div className="scenario-panel">
+              <p className="scenario-panel-title">Elige una situación</p>
+              <div className="scenario-grid">
+                {SCENARIOS.map((s) => (
+                  <button
+                    key={s.id}
+                    className={`scenario-card ${scenario.id === s.id ? 'active' : ''}`}
+                    onClick={() => switchScenario(s)}
+                  >
+                    <span className="scenario-card-emoji">{s.emoji}</span>
+                    <span className="scenario-card-label">{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {showGrammarPanel && (
+            <div className="grammar-panel">
+              <div className="grammar-panel-header">
+                <span>❓ Preguntas de gramática</span>
+                <button className="grammar-close-btn" onClick={() => setShowGrammarPanel(false)}>✕</button>
+              </div>
+              <div className="grammar-messages">
+                {grammarMessages.length === 0 && (
+                  <p className="grammar-empty">Ask me anything about Spanish grammar, vocabulary, or expressions! You can also tap the ❓ button on any of Sofía's messages.</p>
+                )}
+                {grammarMessages.map((msg, i) => (
+                  <div key={i} className={`grammar-bubble ${msg.role}`}>
+                    {msg.role === 'assistant' ? '📚 ' : '👤 '}{msg.content}
+                  </div>
+                ))}
+                {grammarLoading && (
+                  <div className="grammar-bubble assistant grammar-loading">
+                    <span className="dots"><span /><span /><span /></span>
+                  </div>
+                )}
+                <div ref={grammarBottomRef} />
+              </div>
+              <div className="grammar-input-row">
+                <input
+                  type="text"
+                  value={grammarInput}
+                  onChange={(e) => setGrammarInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && sendGrammarMessage()}
+                  placeholder="e.g. What's the difference between por and para?"
+                  disabled={grammarLoading}
+                />
+                <button
+                  className="send-btn"
+                  onClick={sendGrammarMessage}
+                  disabled={grammarLoading || !grammarInput.trim()}
+                >↑</button>
+              </div>
+            </div>
+          )}
+
+          <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} onUnlockAudio={unlockAudio} onAskGrammar={openGrammarPanel} />
+
+          {transcript && <div className="transcript-preview">{transcript}</div>}
+
+          <div className="input-area">
+            <div className="text-input-row">
+              <input
+                type="text"
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendMessage(inputText)}
+                placeholder="O escribe aquí..."
+                disabled={isLoading || isListening}
+                aria-label="Type in Spanish"
+              />
+              <button
+                className="send-btn"
+                onClick={() => sendMessage(inputText)}
+                disabled={isLoading || isListening || !inputText.trim()}
+                aria-label="Send"
+              >↑</button>
+            </div>
+            <div className="mic-row">
+              {hasSpeechSupport ? (
+                <MicButton isListening={isListening} isLoading={isLoading} onStart={startListening} onStop={stopListening} />
+              ) : (
+                <p className="no-speech-notice">Speech not supported. Use Chrome for mic input.</p>
+              )}
+              <button
+                className={`speed-btn ${speedIdx > 0 ? 'slowed' : ''}`}
+                onClick={cycleSpeed}
+                title="Change playback speed"
+                aria-label="Change speech speed"
+              >
+                🐢 {currentSpeed.label}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Translator tab ── */}
+      {activeTab === 'translator' && <Translator />}
+
     </div>
   );
 }
