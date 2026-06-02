@@ -51,6 +51,7 @@ export default function App() {
   const [showDrillPanel, setShowDrillPanel] = useState(false);
   const [drillType, setDrillType] = useState(null);   // 'shadowing' | 'vocabulary' | 'dialogue'
   const [drillTopic, setDrillTopic] = useState(null); // free-text topic label
+  const [pendingEdit, setPendingEdit] = useState(null); // transcript held for review/edit before send
 
   // Grammar panel — separate from main conversation, never affects it
   const [showGrammarPanel, setShowGrammarPanel] = useState(false);
@@ -351,11 +352,12 @@ export default function App() {
 
     recognition.onend = () => {
       setIsListening(false);
-      // Only send if stopListening hasn't already sent (prevents double-send)
+      // If stopListening already handled it, skip
       if (!sentByStopRef.current) {
         const pending = pendingTranscriptRef.current.trim();
         if (pending) {
-          sendMessage(pending);
+          setPendingEdit(pending);
+          setTranscript('');
           pendingTranscriptRef.current = '';
         }
       }
@@ -368,14 +370,13 @@ export default function App() {
 
   const stopListening = useCallback(() => {
     const pending = pendingTranscriptRef.current.trim();
-    if (pending) {
-      sentByStopRef.current = true;  // flag onend to skip its send
-      pendingTranscriptRef.current = '';
-      sendMessage(pending);
-    }
+    sentByStopRef.current = true;  // flag onend to skip its handling
+    pendingTranscriptRef.current = '';
+    setTranscript('');
+    if (pending) setPendingEdit(pending);
     recognitionRef.current?.stop();
     setIsListening(false);
-  }, [sendMessage]);
+  }, []);
 
   const switchScenario = (s) => {
     window.speechSynthesis?.cancel();
@@ -384,6 +385,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: s.opening }]);
     setTranscript('');
     setInputText('');
+    setPendingEdit(null);
   };
 
   const DRILL_TOPICS = [
@@ -426,6 +428,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: scenario.opening }]);
     setTranscript('');
     setInputText('');
+    setPendingEdit(null);
   };
 
   const startNewConversation = () => {
@@ -434,6 +437,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: scenario.opening }]);
     setTranscript('');
     setInputText('');
+    setPendingEdit(null);
     speakText(scenario.opening);
   };
 
@@ -608,6 +612,35 @@ export default function App() {
       <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} onUnlockAudio={unlockAudio} onAskGrammar={openGrammarPanel} />
 
       {transcript && <div className="transcript-preview">{transcript}</div>}
+
+      {pendingEdit !== null && (
+        <div className="pending-edit-row">
+          <span className="pending-edit-label">🎤</span>
+          <input
+            type="text"
+            className="pending-edit-input"
+            value={pendingEdit}
+            onChange={(e) => setPendingEdit(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && pendingEdit.trim()) { sendMessage(pendingEdit); setPendingEdit(null); }
+              if (e.key === 'Escape') setPendingEdit(null);
+            }}
+            autoFocus
+            aria-label="Edit transcription before sending"
+          />
+          <button
+            className="send-btn"
+            onClick={() => { sendMessage(pendingEdit); setPendingEdit(null); }}
+            disabled={isLoading || !pendingEdit.trim()}
+            aria-label="Send"
+          >↑</button>
+          <button
+            className="cancel-edit-btn"
+            onClick={() => setPendingEdit(null)}
+            aria-label="Discard"
+          >✕</button>
+        </div>
+      )}
 
       <div className="input-area">
         <div className="text-input-row">
