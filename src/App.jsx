@@ -51,6 +51,7 @@ export default function App() {
   const [showDrillPanel, setShowDrillPanel] = useState(false);
   const [drillType, setDrillType] = useState(null);   // 'shadowing' | 'vocabulary' | 'dialogue'
   const [drillTopic, setDrillTopic] = useState(null); // free-text topic label
+  const [pendingEdit, setPendingEdit] = useState(null); // transcript held for review/edit before send
 
   // Grammar panel — separate from main conversation, never affects it
   const [showGrammarPanel, setShowGrammarPanel] = useState(false);
@@ -72,6 +73,7 @@ export default function App() {
   const pendingTranscriptRef = useRef('');
   const sentByStopRef = useRef(false);   // prevents onend double-send
   const audioRef = useRef(null);
+  const audioBlobUrlRef = useRef(null);  // tracks current blob URL for cleanup
   const audioUnlockedRef = useRef(false);
   // speedRef stays current even inside stale callbacks
   const speedRef = useRef(SPEEDS[0].rate);
@@ -126,25 +128,30 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // Use a dedicated throw-away element for the iOS unlock gesture —
-  // NEVER audioRef.current, to avoid any race with real playback.
+  // Create and silently play the persistent Audio element during the first user gesture.
+  // Reusing this same element for all TTS ensures iOS routes every subsequent auto-response
+  // to CarPlay (or whatever the active output is) — not just manually-tapped Escuchar buttons.
   const unlockAudio = useCallback(() => {
     if (audioUnlockedRef.current) return;
     audioUnlockedRef.current = true;
-    const silent = new Audio();
-    silent.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-    silent.volume = 0;
-    silent.play().catch(() => {});
+    const audio = new Audio();
+    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    audio.volume = 0;
+    audio.play().catch(() => {});
+    audioRef.current = audio;  // keep this element — speakText will reuse it
   }, []);
 
   const speakText = useCallback(async (text) => {
-    // Stop whatever is playing
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
+    // Pause current playback but keep the element — nulling it would lose the CarPlay route.
+    if (audioRef.current) audioRef.current.pause();
     window.speechSynthesis?.cancel();
     setIsPaused(false);
+
+    // Revoke previous blob URL before creating a new one
+    if (audioBlobUrlRef.current) {
+      URL.revokeObjectURL(audioBlobUrlRef.current);
+      audioBlobUrlRef.current = null;
+    }
 
     try {
       const res = await fetch('/api/speak', {
@@ -156,13 +163,30 @@ export default function App() {
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
+      audioBlobUrlRef.current = url;
+
+      // Reuse the element created in unlockAudio (or create one if somehow missing).
+      // Changing src on the same element preserves the iOS audio route established
+      // during the first user gesture, so auto-responses reach CarPlay too.
+      const audio = audioRef.current ?? new Audio();
       audioRef.current = audio;
+      audio.volume = 1;
+      audio.src = url;
       audio.playbackRate = speedRef.current;
       audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
       audio.onpause  = () => { setIsPaused(true); };
-      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
-      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); };
+      audio.onended  = () => {
+        setIsSpeaking(false);
+        setIsPaused(false);
+        URL.revokeObjectURL(url);
+        audioBlobUrlRef.current = null;
+      };
+      audio.onerror  = () => {
+        setIsSpeaking(false);
+        setIsPaused(false);
+        URL.revokeObjectURL(url);
+        audioBlobUrlRef.current = null;
+      };
       await audio.play();
     } catch {
       speakWebSpeech(text);
@@ -328,11 +352,12 @@ export default function App() {
 
     recognition.onend = () => {
       setIsListening(false);
-      // Only send if stopListening hasn't already sent (prevents double-send)
+      // If stopListening already handled it, skip
       if (!sentByStopRef.current) {
         const pending = pendingTranscriptRef.current.trim();
         if (pending) {
-          sendMessage(pending);
+          setPendingEdit(pending);
+          setTranscript('');
           pendingTranscriptRef.current = '';
         }
       }
@@ -345,14 +370,13 @@ export default function App() {
 
   const stopListening = useCallback(() => {
     const pending = pendingTranscriptRef.current.trim();
-    if (pending) {
-      sentByStopRef.current = true;  // flag onend to skip its send
-      pendingTranscriptRef.current = '';
-      sendMessage(pending);
-    }
+    sentByStopRef.current = true;  // flag onend to skip its handling
+    pendingTranscriptRef.current = '';
+    setTranscript('');
+    if (pending) setPendingEdit(pending);
     recognitionRef.current?.stop();
     setIsListening(false);
-  }, [sendMessage]);
+  }, []);
 
   const switchScenario = (s) => {
     window.speechSynthesis?.cancel();
@@ -361,6 +385,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: s.opening }]);
     setTranscript('');
     setInputText('');
+    setPendingEdit(null);
   };
 
   const DRILL_TOPICS = [
@@ -403,6 +428,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: scenario.opening }]);
     setTranscript('');
     setInputText('');
+    setPendingEdit(null);
   };
 
   const startNewConversation = () => {
@@ -411,6 +437,7 @@ export default function App() {
     setMessages([{ role: 'assistant', content: scenario.opening }]);
     setTranscript('');
     setInputText('');
+    setPendingEdit(null);
     speakText(scenario.opening);
   };
 
@@ -542,8 +569,19 @@ export default function App() {
               <p className="grammar-empty">Ask me anything about Spanish grammar, vocabulary, or expressions! You can also tap the ❓ button on any of Sofía's messages.</p>
             )}
             {grammarMessages.map((msg, i) => (
-              <div key={i} className={`grammar-bubble ${msg.role}`}>
-                {msg.role === 'assistant' ? '📚 ' : '👤 '}{msg.content}
+              <div key={i} className={`grammar-msg-wrap ${msg.role}`}>
+                <div className={`grammar-bubble ${msg.role}`}>
+                  {msg.role === 'assistant' ? '📚 ' : '👤 '}{msg.content}
+                </div>
+                {msg.role === 'assistant' && (
+                  <button
+                    className="grammar-listen-btn"
+                    onClick={() => { unlockAudio(); speakText(msg.content); }}
+                    title="Listen to this explanation"
+                  >
+                    🔊 <span>escuchar</span>
+                  </button>
+                )}
               </div>
             ))}
             {grammarLoading && (
@@ -574,6 +612,35 @@ export default function App() {
       <ConversationHistory messages={messages} isLoading={isLoading} onReplay={speakText} onUnlockAudio={unlockAudio} onAskGrammar={openGrammarPanel} />
 
       {transcript && <div className="transcript-preview">{transcript}</div>}
+
+      {pendingEdit !== null && (
+        <div className="pending-edit-row">
+          <span className="pending-edit-label">🎤</span>
+          <input
+            type="text"
+            className="pending-edit-input"
+            value={pendingEdit}
+            onChange={(e) => setPendingEdit(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && pendingEdit.trim()) { sendMessage(pendingEdit); setPendingEdit(null); }
+              if (e.key === 'Escape') setPendingEdit(null);
+            }}
+            autoFocus
+            aria-label="Edit transcription before sending"
+          />
+          <button
+            className="send-btn"
+            onClick={() => { sendMessage(pendingEdit); setPendingEdit(null); }}
+            disabled={isLoading || !pendingEdit.trim()}
+            aria-label="Send"
+          >↑</button>
+          <button
+            className="cancel-edit-btn"
+            onClick={() => setPendingEdit(null)}
+            aria-label="Discard"
+          >✕</button>
+        </div>
+      )}
 
       <div className="input-area">
         <div className="text-input-row">
