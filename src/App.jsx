@@ -76,6 +76,8 @@ export default function App() {
   const sentByStopRef      = useRef(false);
   const audioRef           = useRef(null);
   const audioBlobUrlRef    = useRef(null);
+  const audioContextRef    = useRef(null);   // WebAudio context — keeps CarPlay route alive
+  const audioSourceNodeRef = useRef(null);   // MediaElementSourceNode for current TTS element
   const audioUnlockedRef   = useRef(false);
   const speedRef           = useRef(SPEEDS[0].rate);
 
@@ -110,6 +112,23 @@ export default function App() {
     return () => window.speechSynthesis?.removeEventListener('voiceschanged', loadVoice);
   }, []);
 
+  // Tell iOS/CarPlay this is a media-playback app so it routes audio to the active output
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: 'Sofía — Spanish Practice',
+      artist: 'AI Language Tutor',
+    });
+    navigator.mediaSession.setActionHandler('play',  () => audioRef.current?.play());
+    navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
+    return () => {
+      try {
+        navigator.mediaSession.setActionHandler('play',  null);
+        navigator.mediaSession.setActionHandler('pause', null);
+      } catch {}
+    };
+  }, []);
+
   const speakWebSpeech = useCallback((text) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
@@ -124,26 +143,33 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // Create and silently play the persistent Audio element during the first user gesture.
-  // Reusing this same element for all TTS ensures iOS routes every subsequent auto-response
-  // to CarPlay (or whatever the active output is) — not just manually-tapped Escuchar buttons.
+  // On the first user gesture, create an AudioContext — iOS ties the CarPlay audio route
+  // to the AudioContext session, not to individual Audio elements.  Every TTS clip played
+  // through createMediaElementSource on this context will reach CarPlay automatically,
+  // even when the actual .play() call happens seconds later in an async callback.
   const unlockAudio = useCallback(() => {
     if (audioUnlockedRef.current) return;
     audioUnlockedRef.current = true;
-    const audio = new Audio();
-    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-    audio.volume = 0;
-    audio.play().catch(() => {});
-    audioRef.current = audio;  // keep this element — speakText will reuse it
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      audioContextRef.current = ctx;
+    } catch { /* AudioContext unavailable — fall back to direct element routing */ }
+    // Also satisfy browser autoplay policy with a silent HTMLAudio play
+    const silence = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+    silence.play().catch(() => {});
   }, []);
 
   const speakText = useCallback(async (text) => {
-    // Pause current playback but keep the element — nulling it would lose the CarPlay route.
-    if (audioRef.current) audioRef.current.pause();
+    // Stop current playback and disconnect its AudioContext source node
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if (audioSourceNodeRef.current) {
+      try { audioSourceNodeRef.current.disconnect(); } catch {}
+      audioSourceNodeRef.current = null;
+    }
     window.speechSynthesis?.cancel();
     setIsPaused(false);
 
-    // Revoke previous blob URL before creating a new one
     if (audioBlobUrlRef.current) {
       URL.revokeObjectURL(audioBlobUrlRef.current);
       audioBlobUrlRef.current = null;
@@ -158,20 +184,28 @@ export default function App() {
       if (!res.ok) throw new Error('ElevenLabs unavailable');
 
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const url  = URL.createObjectURL(blob);
       audioBlobUrlRef.current = url;
 
-      // Reuse the element created in unlockAudio (or create one if somehow missing).
-      // Changing src on the same element preserves the iOS audio route established
-      // during the first user gesture, so auto-responses reach CarPlay too.
-      const audio = audioRef.current ?? new Audio();
+      const audio = new Audio(url);
       audioRef.current = audio;
-      audio.volume = 1;
-      audio.src = url;
       audio.playbackRate = speedRef.current;
-      audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); };
-      audio.onpause  = () => { setIsPaused(true); };
-      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audioBlobUrlRef.current = null; };
+
+      // Route through the AudioContext that was created during the first user gesture.
+      // This is what makes iOS send async auto-responses to CarPlay instead of the speaker.
+      const ctx = audioContextRef.current;
+      if (ctx) {
+        try {
+          if (ctx.state === 'suspended') await ctx.resume();
+          const sourceNode = ctx.createMediaElementSource(audio);
+          sourceNode.connect(ctx.destination);
+          audioSourceNodeRef.current = sourceNode;
+        } catch { /* createMediaElementSource unavailable — fall through to direct routing */ }
+      }
+
+      audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; };
+      audio.onpause  = () => { setIsPaused(true);                        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';  };
+      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audioBlobUrlRef.current = null; if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none'; };
       audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audioBlobUrlRef.current = null; };
       await audio.play();
     } catch {
