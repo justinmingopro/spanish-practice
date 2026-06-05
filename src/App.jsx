@@ -76,8 +76,6 @@ export default function App() {
   const sentByStopRef      = useRef(false);
   const audioRef           = useRef(null);
   const audioBlobUrlRef    = useRef(null);
-  const audioContextRef    = useRef(null);   // WebAudio context — keeps CarPlay route alive
-  const audioSourceNodeRef = useRef(null);   // MediaElementSourceNode for current TTS element
   const audioUnlockedRef   = useRef(false);
   const speedRef           = useRef(SPEEDS[0].rate);
 
@@ -143,30 +141,15 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // On the first user gesture, create an AudioContext — iOS ties the CarPlay audio route
-  // to the AudioContext session, not to individual Audio elements.  Every TTS clip played
-  // through createMediaElementSource on this context will reach CarPlay automatically,
-  // even when the actual .play() call happens seconds later in an async callback.
   const unlockAudio = useCallback(() => {
     if (audioUnlockedRef.current) return;
     audioUnlockedRef.current = true;
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-      audioContextRef.current = ctx;
-    } catch { /* AudioContext unavailable — fall back to direct element routing */ }
-    // Also satisfy browser autoplay policy with a silent HTMLAudio play
     const silence = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
     silence.play().catch(() => {});
   }, []);
 
   const speakText = useCallback(async (text) => {
-    // Stop current playback and disconnect its AudioContext source node
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    if (audioSourceNodeRef.current) {
-      try { audioSourceNodeRef.current.disconnect(); } catch {}
-      audioSourceNodeRef.current = null;
-    }
     window.speechSynthesis?.cancel();
     setIsPaused(false);
 
@@ -190,19 +173,6 @@ export default function App() {
       const audio = new Audio(url);
       audioRef.current = audio;
       audio.playbackRate = speedRef.current;
-
-      // Route through the AudioContext that was created during the first user gesture.
-      // This is what makes iOS send async auto-responses to CarPlay instead of the speaker.
-      const ctx = audioContextRef.current;
-      if (ctx) {
-        try {
-          if (ctx.state === 'suspended') await ctx.resume();
-          const sourceNode = ctx.createMediaElementSource(audio);
-          sourceNode.connect(ctx.destination);
-          audioSourceNodeRef.current = sourceNode;
-        } catch { /* createMediaElementSource unavailable — fall through to direct routing */ }
-      }
-
       audio.onplay   = () => { setIsSpeaking(true);  setIsPaused(false); if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; };
       audio.onpause  = () => { setIsPaused(true);                        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';  };
       audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); URL.revokeObjectURL(url); audioBlobUrlRef.current = null; if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none'; };
