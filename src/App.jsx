@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ConversationHistory from './components/ConversationHistory';
 import MicButton from './components/MicButton';
 import Translator from './components/Translator';
+import Reader from './components/Reader';
 import './App.css';
 
 const SCENARIOS = [
@@ -38,7 +39,7 @@ export default function App() {
   const savedScenario = SCENARIOS.find((s) => s.id === saved?.scenarioId) ?? SCENARIOS[0];
   const savedMessages = saved?.messages?.length ? saved.messages : [{ role: 'assistant', content: savedScenario.opening }];
 
-  const [activeTab,        setActiveTab]        = useState('sofia'); // 'sofia' | 'translator'
+  const [activeTab,        setActiveTab]        = useState('sofia'); // 'sofia' | 'translator' | 'reader'
   const [scenario,         setScenario]         = useState(savedScenario);
   const [showScenarios,    setShowScenarios]    = useState(false);
   const [messages,         setMessages]         = useState(savedMessages);
@@ -417,10 +418,12 @@ export default function App() {
       {/* ── Header ── */}
       <header className="app-header">
         <div className="header-title">
-          <h1>{activeTab === 'translator' ? '🔄 Translator' : '🇪🇸 Sofía'}</h1>
+          <h1>{activeTab === 'translator' ? '🔄 Translator' : activeTab === 'reader' ? '📖 Reader' : '🇪🇸 Sofía'}</h1>
           <p className="scenario-label">
             {activeTab === 'translator'
               ? 'English ↔ Spanish'
+              : activeTab === 'reader'
+              ? 'Read any text aloud'
               : `${scenario.emoji} ${scenario.label}`}
           </p>
         </div>
@@ -466,6 +469,12 @@ export default function App() {
           onClick={() => setActiveTab('translator')}
         >
           🔄 Translate
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'reader' ? 'active' : ''}`}
+          onClick={() => setActiveTab('reader')}
+        >
+          📖 Reader
         </button>
       </div>
 
@@ -666,6 +675,9 @@ export default function App() {
 
       {/* ── Translator tab ── */}
       {activeTab === 'translator' && <Translator />}
+
+      {/* ── Reader tab ── */}
+      {activeTab === 'reader' && <Reader />}
 
     </div>
   );
